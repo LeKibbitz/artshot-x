@@ -46,7 +46,7 @@ Recent originals are stored under `~/Library/Application Support/ArtShot X/`. Im
 
 ## Development and distribution
 
-The build script creates an app signed locally with an ad-hoc signature. It is not a notarized distribution build.
+The build script creates an app signed locally with an ad-hoc signature by default. It is not a notarized distribution build. Ad-hoc rebuilds can invalidate macOS capture permissions even while the Settings switch remains enabled. To reuse an existing stable development signing identity, set `ARTSHOT_SIGNING_IDENTITY` when running the build script; the script does not create or install certificates.
 
 Automated geometry, image, stitching and video export checks use synthetic inputs. Live screen capture, physical camera/microphone recording, audio synchronization and multi-display behavior still need hardware acceptance; passing those checks does not verify these live workflows.
 

@@ -64,6 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(NSMenuItem(title: "Tout sélectionner", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         edit.submenu = editMenu
         main.addItem(edit)
+        let view = NSMenuItem(title: "Présentation", action: nil, keyEquivalent: "")
+        let viewMenu = NSMenu(title: "Présentation")
+        let fullscreen = NSMenuItem(title: "Plein écran", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        fullscreen.keyEquivalentModifierMask = [.control, .command]
+        viewMenu.addItem(fullscreen)
+        view.submenu = viewMenu
+        main.addItem(view)
         NSApp.mainMenu = main
 
         let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)

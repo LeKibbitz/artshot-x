@@ -27,6 +27,8 @@ The app appears in the menu bar and opens its capture panel. Grant **Screen & Sy
 
 For an immediate editor test, click **Essayer une image**. Draw an arrow or rectangle, undo with Command-Z, copy with Command-C or save a PNG with Command-S.
 
+The preview supports native macOS full screen using the green window button or Control-Command-F. Use the same shortcut to return to a normal window.
+
 | Shortcut | Action |
 | --- | --- |
 | Control + Option + Command + 5 | Capture a display |

@@ -30,6 +30,7 @@ final class PreviewWindowController: NSWindowController, NSWindowDelegate, NSToo
         window.subtitle = "Aperçu de la capture"
         window.minSize = NSSize(width: 680, height: 430)
         window.isReleasedWhenClosed = false
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.delegate = self
         window.center()
         window.toolbarStyle = .unified

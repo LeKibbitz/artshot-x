@@ -32,3 +32,5 @@ Copy overwrites the system clipboard only when the user requests it. Save uses a
 On 2026-10-16, the release app built and passed local signature verification with Swift 6.3.3 on Apple Silicon. All 6 geometry tests and the AppKit export smoke harness passed. The installed app was launched; its sample image, arrow/rectangle controls, undo button and PNG save panel were exercised. The saved PNG retained its 2000 × 1300 pixel dimensions.
 
 Screen capture authorization had not yet been granted to this new app. Live display/region capture, keyboard shortcuts, clipboard interoperability and a physical multi-display setup still require manual acceptance. The UI is an early preview, not a completed feature-parity release.
+
+The native full-screen fix was subsequently verified in a separate app instance: the preview's accessibility control changed from a zoom button to a full-screen button, clicking it entered full-screen mode, and Control-Command-F returned to the original window size. The AppKit smoke harness and release build still passed. The capture panel remains a fixed-size utility window.

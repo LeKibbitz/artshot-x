@@ -1,14 +1,16 @@
 import AppKit
+import CoreText
 
 /// Image and annotations share bottom-left-origin, native-pixel coordinates.
 @MainActor
 final class AnnotationCanvas: NSView {
-    enum Tool: Int { case preview, arrow, rectangle }
+    enum Tool: Int { case preview, arrow, rectangle, step }
 
     private struct Annotation {
         let tool: Tool
         let start: CGPoint
         let end: CGPoint
+        var stepNumber: Int? = nil
     }
 
     enum ExportError: LocalizedError {
@@ -41,6 +43,7 @@ final class AnnotationCanvas: NSView {
     var hasImage: Bool { source != nil }
     var canUndo: Bool { !annotations.isEmpty }
     var annotationCount: Int { annotations.count }
+    var stepCount: Int { annotations.filter { $0.tool == .step }.count }
     var fitPercentage: Int {
         guard pixelSize.width > 0 else { return 0 }
         return Int((imageRect.width / pixelSize.width * 100).rounded())
@@ -120,6 +123,13 @@ final class AnnotationCanvas: NSView {
         window?.makeFirstResponder(self)
         guard tool != .preview,
               let start = nativePoint(convert(event.locationInWindow, from: nil), clamp: false) else { return }
+        if tool == .step {
+            annotations.append(Annotation(tool: .step, start: start, end: start,
+                                          stepNumber: stepCount + 1))
+            needsDisplay = true
+            onChange?()
+            return
+        }
         dragStart = start
         draft = Annotation(tool: tool, start: start, end: start)
     }
@@ -177,6 +187,9 @@ final class AnnotationCanvas: NSView {
         for annotation in objects {
             switch annotation.tool {
             case .preview: break
+            case .step:
+                guard let number = annotation.stepNumber else { continue }
+                renderStep(number, at: annotation.start, in: context)
             case .rectangle:
                 let rectangle = CGRect(x: min(annotation.start.x, annotation.end.x),
                                        y: min(annotation.start.y, annotation.end.y),
@@ -203,6 +216,33 @@ final class AnnotationCanvas: NSView {
                 context.fillPath()
             }
         }
+    }
+
+    private func renderStep(_ number: Int, at center: CGPoint, in context: CGContext) {
+        let diameter = max(30, strokeWidth * 10)
+        let circle = CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2,
+                            width: diameter, height: diameter)
+        context.saveGState()
+        context.fillEllipse(in: circle)
+        context.setStrokeColor(CGColor(gray: 1, alpha: 1))
+        context.setLineWidth(max(1, diameter / 24))
+        context.strokeEllipse(in: circle.insetBy(dx: 0.75, dy: 0.75))
+
+        // Core Text uses the same native-pixel context for preview and PNG export.
+        let font = NSFont.monospacedDigitSystemFont(ofSize: diameter * 0.6, weight: .bold)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 1, alpha: 1)
+        ]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: String(number), attributes: attributes))
+        let glyphBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        let scale = min(1, diameter * 0.72 / max(glyphBounds.width, 1))
+        context.translateBy(x: center.x, y: center.y)
+        context.scaleBy(x: scale, y: scale)
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(x: -glyphBounds.midX, y: -glyphBounds.midY)
+        CTLineDraw(line, context)
+        context.restoreGState()
     }
 
     func exportedPNG() throws -> Data {

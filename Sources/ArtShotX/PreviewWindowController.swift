@@ -86,13 +86,14 @@ final class PreviewWindowController: NSWindowController, NSWindowDelegate, NSToo
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         let item = NSToolbarItem(itemIdentifier: identifier)
         if identifier == Item.tools {
-            let control = NSSegmentedControl(labels: ["Aperçu", "Flèche", "Rectangle"],
+            let control = NSSegmentedControl(labels: ["Aperçu", "Flèche", "Rectangle", "Étapes"],
                                              trackingMode: .selectOne, target: self,
                                              action: #selector(changeTool(_:)))
             control.selectedSegment = 0
             control.setImage(NSImage(systemSymbolName: "eye", accessibilityDescription: nil), forSegment: 0)
             control.setImage(NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: nil), forSegment: 1)
             control.setImage(NSImage(systemSymbolName: "rectangle", accessibilityDescription: nil), forSegment: 2)
+            control.setImage(NSImage(systemSymbolName: "1.circle.fill", accessibilityDescription: nil), forSegment: 3)
             control.setAccessibilityLabel("Outil d’annotation")
             control.isEnabled = canvas.hasImage
             item.view = control
@@ -171,6 +172,7 @@ final class PreviewWindowController: NSWindowController, NSWindowDelegate, NSToo
         case .preview: hintLabel.stringValue = "Choisissez un outil pour annoter votre capture."
         case .arrow: hintLabel.stringValue = "Glissez pour tracer une flèche · Échap pour annuler le tracé."
         case .rectangle: hintLabel.stringValue = "Glissez pour tracer un rectangle · Échap pour annuler le tracé."
+        case .step: hintLabel.stringValue = "Cliquez pour placer l’étape \(canvas.stepCount + 1) · ⌘Z pour annuler."
         }
     }
 

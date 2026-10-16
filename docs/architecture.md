@@ -1,30 +1,42 @@
-# Native capture preview
+# ArtShot X 0.2.0 architecture
 
-The first slice implements a complete local image workflow: command → display/region selection → screenshot → editable preview → clipboard/PNG.
+ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
-| Layer | Choice | Reason |
-| --- | --- | --- |
-| Application | Swift Package executable, AppKit | Menu bar and transient native windows; builds without an Xcode project. |
-| Capture | ScreenCaptureKit / SCScreenshotManager | Public macOS 14+ screenshot APIs; explicit display targeting. |
-| Selection | Transparent AppKit overlay | Keyboard cancellation and accurate display-local geometry. |
-| Editing | AppKit image canvas | Original pixels retained; annotations flattened at export. |
-| Shortcuts | Carbon RegisterEventHotKey | Global commands without keyboard event surveillance. |
-| Storage | User-selected PNG files | No database, server, login or background upload. |
-| Tests | Swift XCTest | Display geometry, clipping, coordinate origin and Retina scaling. |
+| Component | Responsibility |
+| --- | --- |
+| `AppDelegate` | Menu bar, capture coordination, transient windows, recent items and quit handling. |
+| `GlobalShortcuts` | Carbon hotkeys for Command–Option–Shift–5/6/7 without observing ordinary typing. |
+| `CaptureService` | ScreenCaptureKit screenshots; display targeting, exclusion of ArtShot X and Retina pixel preservation. |
+| `SelectionOverlayController` | Single-display region selection with Return/Escape confirmation. |
+| `ScrollingCaptureController` / `ScrollStitcher` | Settled-frame capture, conservative vertical registration and image assembly. |
+| `QuickAccessController` | Bottom-left thumbnail with delete/edit/save/copy actions; image copying only. |
+| `CaptureLibrary` | Atomic local index and persistent screenshot/recording originals. |
+| `AnnotationCanvas` / `PreviewWindowController` | Arrow, rectangle and numbered-step annotations, undo, PNG export and clipboard copying. |
+| `RecordingController` / `ScreenRecorder` | Recording options, permissions, device capture, screen capture and independent media tracks. |
+| `RecordingComposition` / `VideoPreviewWindowController` | Source/effect toggles, trimming, preview and MP4 export. |
 
-All UI ownership is on the main actor. The coordinator serializes capture requests. Region rectangles use global AppKit coordinates (origin at the bottom left); the capture layer converts into display-local coordinates and pixels. Selection is limited to a single display per capture.
+## Images and scrolling
 
-The capture service excludes the current application from ScreenCaptureKit content. The coordinator hides its windows before capture and opens a new preview on completion. Cancellation does not create an image. Missing screen access is surfaced with a route to the relevant system settings; the application never changes permissions itself.
+UI controllers belong to the main actor. The coordinator prevents overlapping capture operations. Public region rectangles use global AppKit points with a bottom-left origin; the capture layer converts them into display-local coordinates and native pixels. A region belongs to one display.
 
-Each preview owns an immutable source image and in-memory annotations. Copy and save render annotations into a new image. Closing an unsaved preview discards this in-memory session. A versioned project format and persistent history are later work.
+Scrolling is manual. A nonactivating HUD leaves input with the underlying app while periodic screenshots wait for stable content. Registration compares grayscale samples at native vertical resolution, ignores duplicate frames and tolerates a fixed heading in the top quarter. It rejects ambiguous overlap, upward movement, oversized movement and detected fixed footers. The user can return to a known position and retry a smaller downward scroll.
 
-No HTTP endpoints or SQL schema are needed for this local slice. The domain boundaries are CaptureService, SelectionOverlayController, PreviewWindowController and the application coordinator.
+The output contains the initial frame followed by newly revealed bottom strips. Each strip is copied into its own bitmap to avoid retaining every full screenshot. Limits are 20,000 output rows, 32 million output pixels and 200 positions. Finishing checks the current viewport again so the final movement is not silently omitted. Cancellation returns no image.
 
-## Next slices
+Image previews retain an immutable source and an in-memory annotation list. Numbered steps increment on placement; undo reuses the next available number. Export flattens annotations at source pixel resolution. Closing the editor discards its annotation session; the local original remains available.
 
-1. Harden display changes, window capture, shortcut configuration and exports.
-2. Add OCR and durable local history.
-3. Add screen recording with explicit media source permissions and recovery.
-4. Research scrolling capture independently.
+## Recordings and edits
 
-The three main risks are permissions and display geometry, high-resolution rendering, and future audiovisual synchronization.
+ScreenCaptureKit supplies screen frames and optional system audio. AVFoundation supplies optional camera and microphone inputs. A serial recording queue owns frame rendering and media writing. The original MOV keeps screen and camera video tracks separate, as well as system and microphone audio tracks. A JSON sidecar stores recording options and timestamped click/shortcut events.
+
+Click positions are normalized within the selected capture area. Shortcut labels include special keys and Command shortcuts, using the current keyboard layout; ordinary typed characters are not stored as keyboard events. Enabling these overlays requests Accessibility access. A selected cursor is rendered by ScreenCaptureKit into the screen video and cannot be removed in the editor.
+
+The video editor builds an AVFoundation composition for source toggles and start/end trimming. Native drawing supplies click/shortcut effects during preview; Core Animation supplies those effects during MP4 export. Edits do not rewrite the original tracks. Export writes a temporary file alongside the destination and replaces the destination only after completion; exporting over the original is rejected.
+
+## Local storage and boundaries
+
+`~/Library/Application Support/ArtShot X/Captures/` contains screenshot originals and the capture index. `Recordings/<UUID>/` contains each original MOV and its metadata. Recent items survive relaunch; the menu displays the most recent 20 entries. Delete moves an app-owned capture or recording project to Trash. It does not authorize deletion outside app storage.
+
+No server, database, login or network upload is involved. There is no durable annotation/edit project format yet. The app uses public macOS APIs and requires macOS 14 or newer.
+
+Synthetic tests cover geometry, annotations, stitching, media composition and export. Hardware permissions, live audiovisual synchronization, external display layouts and device failures require separate manual acceptance.

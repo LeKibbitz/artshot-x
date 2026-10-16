@@ -6,10 +6,12 @@
   <key>CFBundleIdentifier</key><string>org.artshotx.app</string>
   <key>CFBundleExecutable</key><string>ArtShotX</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSScreenCaptureUsageDescription</key><string>ArtShot X capture uniquement l’écran ou la zone que vous choisissez, pour créer une image locale.</string>
+  <key>NSCameraUsageDescription</key><string>ArtShot X utilise la caméra uniquement lorsque vous choisissez de l’incruster dans votre enregistrement local.</string>
+  <key>NSMicrophoneUsageDescription</key><string>ArtShot X enregistre le microphone uniquement lorsque vous activez cette option pour votre vidéo locale.</string>
 </dict></plist>

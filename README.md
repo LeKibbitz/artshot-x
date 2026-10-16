@@ -1,16 +1,18 @@
 # ArtShot X
 
-A local, open-source screenshot utility for macOS. Built from scratch with Swift, AppKit and ScreenCaptureKit.
+A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
-## First preview
+## Version 0.2.0
 
 - Capture the display under your pointer or select a region.
-- Open a captured image in a native preview.
-- Copy or save a PNG, with basic arrows and rectangles.
-- Open existing images without screen capture permission.
-- Menu bar commands and independent keyboard shortcuts.
+- Get a floating thumbnail at the bottom left, with **Delete**, **Edit**, **Save** and **Copy** actions. Copy is available for images.
+- Annotate images with arrows, rectangles and numbered steps; undo annotations, copy the result or save a PNG.
+- Reopen recent screenshots and recordings across app launches. Originals stay on your Mac.
+- Stitch a vertical scrolling screenshot while you scroll the underlying app manually.
+- Record a display or region, optionally with camera, system audio, microphone, click indicators and shortcut labels.
+- Edit a recording by toggling captured sources and effects, trimming its start/end and exporting an MP4. The cursor, when enabled, is baked into the screen video.
 
-This is an early preview. Screen recording, GIF export, scrolling capture, OCR and persistent history are not included yet.
+The app runs in the background with a menu bar icon. Launching it does not open a panel or editor. The interface is currently in French. GIF export, OCR and window-specific capture are not included.
 
 ## Build and run
 
@@ -19,34 +21,39 @@ Requires macOS 14 or newer and a Swift 6 toolchain (Xcode or Command Line Tools)
 ```sh
 bash scripts/test.sh
 bash scripts/test-preview.sh
+bash scripts/test-recording.sh
+bash scripts/test-library.sh
+bash scripts/test-capture-ui.sh
 bash scripts/build.sh
 open "dist/ArtShot X.app"
 ```
 
-The app appears in the menu bar and opens its capture panel. Grant **Screen & System Audio Recording** access in macOS Privacy & Security when prompted, then relaunch the app if macOS requests it. Existing images can be opened without this permission.
-
-For an immediate editor test, click **Essayer une image**. Draw an arrow or rectangle, undo with Command-Z, copy with Command-C or save a PNG with Command-S.
-
-The preview supports native macOS full screen using the green window button or Control-Command-F. Use the same shortcut to return to a normal window.
+Open the menu bar icon or use the capture panel shortcut. Grant screen recording access in macOS Privacy & Security when prompted, then relaunch if macOS requests it. Camera and microphone permissions are requested only when selected. Click and shortcut overlays require Accessibility access. Existing images and the sample editor work without screen capture permission.
 
 | Shortcut | Action |
 | --- | --- |
-| Control + Option + Command + 5 | Capture a display |
-| Control + Option + Command + 6 | Select a region |
-| Control + Option + Command + 7 | Open the capture panel |
+| Command + Option + Shift + 5 | Capture a display |
+| Command + Option + Shift + 6 | Select a region |
+| Command + Option + Shift + 7 | Open the capture panel |
 
-These shortcuts intentionally differ from existing screenshot tools. If registration fails, the menu bar and panel commands remain available. ArtShot X does not change macOS shortcuts or disable other applications.
+The shortcuts use physical number-row keys on AZERTY and QWERTY. If a shortcut conflicts, menu bar and panel commands remain available. ArtShot X does not change macOS shortcuts or disable other apps.
 
-Select a region by dragging. Press Return to confirm or Escape to cancel. The capture stays on the display where selection began.
+For a region, drag to select, press Return to confirm or Escape to cancel. Selection stays on one display. For a scrolling capture, select the document content, scroll downward in small increments and pause after each increment. Click **Terminer** to assemble the image or **Annuler** to cancel. Uncertain alignment, upward scrolling and fixed footers are rejected. Limits are 20,000 pixels of height, 32 million pixels and 200 captured positions.
+
+After recording, choose **Modifier** on the thumbnail to open the video editor. Camera and audio sources are retained as separate tracks in the original MOV; click and shortcut indicators are stored as event metadata. Only special keys and Command shortcuts receive labels; ordinary typed text is not recorded as keyboard events. Screen video still contains whatever is visibly displayed. Sources not selected at recording time cannot be added later.
+
+Recent originals are stored under `~/Library/Application Support/ArtShot X/`. Image annotations and video edit choices are session-local; exported PNGs and MP4s contain the applied edits. The menu offers recent captures and a Finder shortcut to local storage.
 
 ## Development and distribution
 
-The build script creates an app signed locally with an ad-hoc signature. It is not a notarized distribution build. Build from source for this preview; a signed release pipeline will be added separately.
+The build script creates an app signed locally with an ad-hoc signature. It is not a notarized distribution build.
 
-Screen and image processing happen on your Mac. There are no accounts, uploads, analytics or remote services. Private reference media and research notes are excluded from this repository.
+Automated geometry, image, stitching and video export checks use synthetic inputs. Live screen capture, physical camera/microphone recording, audio synchronization and multi-display behavior still need hardware acceptance; passing those checks does not verify these live workflows.
+
+Processing stays on your Mac. There are no accounts, uploads, analytics or remote services. Private reference media and research notes are excluded from this repository.
 
 See [architecture](docs/architecture.md) and [testing](docs/testing.md).
 
 ## License
 
-MIT. ArtShot X is an independent project and is not affiliated with CleanShot.
+MIT. ArtShot X is independent and is not affiliated with CleanShot.

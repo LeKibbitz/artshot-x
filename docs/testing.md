@@ -43,6 +43,6 @@ Copy changes the system clipboard only on request. Save/export uses a native sav
 
 The 16 geometry/stitching tests and the preview, recording, library and capture-UI harnesses passed. The recording harness also exercised interrupted stream finalization and sidecar-write failure against a real AVAssetWriter, preserving valid MOV output. The release app was installed at `~/Applications/ArtShot X.app` and its signature verified.
 
-The installed capture panel was inspected through macOS accessibility and screenshot tools: capture, region, scrolling, recording, recent media and permission actions were visible, and no hotkey registration failure was reported. This establishes successful registration, not physical key delivery. The changed ad-hoc signature required screen-recording reauthorization; real captures and physical camera/microphone checks remain pending.
+The installed capture panel was inspected through macOS accessibility and screenshot tools: capture, region, scrolling, recording, recent media and permission actions were visible, and no hotkey registration failure was reported. This establishes successful registration, not physical key delivery. The changed ad-hoc signature left macOS showing screen recording enabled while both the preflight check and a real ScreenCaptureKit recording attempt were denied by TCC. Reauthorization of the installed bundle is required. No live capture success or physical camera/microphone acceptance is claimed.
 
 For a developer UI check, launch the executable with `--show-capture-panel`. Normal launch has no window.

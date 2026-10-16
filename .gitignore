@@ -1,0 +1,10 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.xcuserstate
+# Private recon material, screenshots, audio, transcripts and local context.
+replica/
+.env
+.env.*
+!.env.example

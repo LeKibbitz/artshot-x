@@ -22,7 +22,7 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
     private var cameraImage: CVPixelBuffer?
     private var startTime: CMTime?
     private var lastTime: CMTime?
-    private var firstScreenTime: CMTime?
+    private var timeline = RecordingTimeline()
     private var size = CGSize.zero
     private var events: [RecordingEvent] = []
     private var active = false
@@ -162,7 +162,6 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
                   let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
                   let status = attachments.first?[.status] as? Int, status == SCFrameStatus.complete.rawValue else { return }
             screenImage = image
-            firstScreenTime = firstScreenTime ?? CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         } else if type == .audio { appendAudio(sampleBuffer, input: systemInput, system: true) }
     }
 
@@ -180,21 +179,44 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
         queue.async { self.fail(error) }
     }
 
-    private func appendAudio(_ buffer: CMSampleBuffer, input: AVAssetWriterInput?, system: Bool) {
-        guard let writer, writer.status == .writing, let startTime, let input, input.isReadyForMoreMediaData,
-              CMSampleBufferGetPresentationTimeStamp(buffer) >= startTime else { return }
-        if input.append(buffer) { if system { systemSamples += 1 } else { microphoneSamples += 1 } }
-        else { fail(writer.error ?? RecordingFailure.message("Échec de l’écriture audio.")) }
+    @MainActor
+    func setPaused(_ paused: Bool) async {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                self.timeline.setPaused(paused, at: CMClockGetTime(CMClockGetHostTimeClock()))
+                continuation.resume()
+            }
+        }
     }
 
-    private func writeFrame() {
-        guard active, let writer, let screenImage, let firstScreenTime else { return }
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
+    @MainActor
+    func elapsedDuration() async -> Double {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: self.timeline.elapsed(at: CMClockGetTime(CMClockGetHostTimeClock()))) }
+        }
+    }
+
+    private func appendAudio(_ buffer: CMSampleBuffer, input: AVAssetWriterInput?, system: Bool) {
+        guard active, let writer, writer.status == .writing, startTime != nil, let input else { return }
+        do {
+            for part in try timeline.audioBuffers(from: buffer) {
+                guard input.isReadyForMoreMediaData else { continue }
+                if input.append(part) { if system { systemSamples += 1 } else { microphoneSamples += 1 } }
+                else { fail(writer.error ?? RecordingFailure.message("Échec de l’écriture audio.")); return }
+            }
+        } catch { fail(error) }
+    }
+
+    private func writeFrame(at hostTime: CMTime? = nil) {
+        guard active, !timeline.isPaused, let writer, let screenImage else { return }
+        let hostTime = hostTime ?? CMClockGetTime(CMClockGetHostTimeClock())
         if startTime == nil {
             guard writer.startWriting() else { fail(writer.error ?? RecordingFailure.message("Impossible de créer la vidéo.")); return }
-            startTime = firstScreenTime
-            writer.startSession(atSourceTime: firstScreenTime)
+            timeline.begin(at: hostTime)
+            startTime = hostTime
+            writer.startSession(atSourceTime: hostTime)
         }
+        guard let now = timeline.presentationTime(for: hostTime) else { return }
         guard writer.status == .writing, let input = screenInput, input.isReadyForMoreMediaData, let adaptor = screenAdaptor else { return }
         guard let frame = rendered(screenImage, adaptor: adaptor, size: size), adaptor.append(frame, withPresentationTime: now) else {
             fail(writer.error ?? RecordingFailure.message("Échec de l’écriture vidéo.")); return
@@ -224,10 +246,12 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
 
     func addEvent(x: Double? = nil, y: Double? = nil, label: String? = nil) {
         let time = CMClockGetTime(CMClockGetHostTimeClock())
-        queue.async {
-            guard self.active, let start = self.startTime else { return }
-            self.events.append(RecordingEvent(time: (time - start).seconds, x: x, y: y, label: label))
-        }
+        queue.async { self.recordEvent(at: time, x: x, y: y, label: label) }
+    }
+
+    private func recordEvent(at time: CMTime, x: Double?, y: Double?, label: String?) {
+        guard active, let start = startTime, let pts = timeline.presentationTime(for: time) else { return }
+        events.append(RecordingEvent(time: (pts - start).seconds, x: x, y: y, label: label))
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) { queue.async { self.fail(error) } }
@@ -245,6 +269,7 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
         return try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 self.active = false
+                self.timeline.stop(at: CMClockGetTime(CMClockGetHostTimeClock()))
                 self.timer?.cancel()
                 self.timer = nil
                 self.devices?.stopRunning()

@@ -5,11 +5,17 @@ import ApplicationServices
 @MainActor
 final class RecordingController: NSObject, NSWindowDelegate {
     var onCompleted: ((URL) -> Void)?
+    var onTakeArchived: ((URL) throws -> Void)?
+    var onStopped: (() -> Void)?
     var onError: ((Error) -> Void)?
     var onStateChanged: (() -> Void)?
     var isBusy: Bool { optionsWindow != nil || isSelecting || isStarting || isRecording || isFinishing }
     var isFinalizing: Bool { isFinishing }
     private(set) var isRecording = false { didSet { onStateChanged?() } }
+    private(set) var isPaused = false
+    private var isChangingPause = false
+    private var restartAfterFinish = false
+    private enum FinishAction { case save, restart, trash }
     private var isStarting = false { didSet { onStateChanged?() } }
     private var isFinishing = false { didSet { onStateChanged?() } }
     private var isSelecting = false { didSet { onStateChanged?() } }
@@ -36,7 +42,6 @@ final class RecordingController: NSObject, NSWindowDelegate {
     private let clicksButton = NSButton(checkboxWithTitle: "Mettre en évidence les clics", target: nil, action: nil)
     private let keysButton = NSButton(checkboxWithTitle: "Afficher les raccourcis et touches spéciales", target: nil, action: nil)
     private var elapsedTimer: Timer?
-    private var startedAt: Date?
     private let startButton = NSButton(title: "Démarrer", target: nil, action: nil)
     private let shapeControl = NSSegmentedControl(labels: ["Rond", "Carré", "Arrondi"], trackingMode: .selectOne, target: nil, action: nil)
     private let sizeControl = NSSlider(value: 0.23, minValue: 0.12, maxValue: 0.45, target: nil, action: nil)
@@ -55,8 +60,9 @@ final class RecordingController: NSObject, NSWindowDelegate {
         if let data = UserDefaults.standard.data(forKey: "recording.cameraLayout"),
            let saved = try? JSONDecoder().decode(CameraLayout.self, from: data) { cameraLayout = saved }
         controls.onStop = { [weak self] in self?.stop() }
-        controls.onCancel = { [weak self] in self?.cancel() }
-        controls.onShowCamera = { [weak self] in self?.showCamera(editable: false) }
+        controls.onCancel = { [weak self] in self?.discardRecording() }
+        controls.onPauseResume = { [weak self] in self?.togglePause() }
+        controls.onRestart = { [weak self] in self?.restart() }
         cameraOverlay.onLayoutChanged = { [weak self] layout in
             guard let self, !self.isRecording, !self.isStarting else { return }
             self.cameraLayout = layout
@@ -82,8 +88,8 @@ final class RecordingController: NSObject, NSWindowDelegate {
     @discardableResult
     func revealActiveControls() -> Bool {
         if isStarting || isRecording || isFinishing {
-            if let screen { controls.show(on: screen); refreshControls() }
             showCamera(editable: false)
+            if let screen { controls.show(on: screen); refreshControls() }
             return true
         }
         if let optionsWindow {
@@ -243,6 +249,8 @@ final class RecordingController: NSObject, NSWindowDelegate {
         let token = UUID()
         generation = token
         startupFailure = nil
+        isPaused = false
+        isChangingPause = false
         isStarting = true
         status = "Préparation…"
         controls.show(on: screen)
@@ -293,7 +301,6 @@ final class RecordingController: NSObject, NSWindowDelegate {
                 if let startupFailure { throw startupFailure }
                 isStarting = false
                 isRecording = true
-                startedAt = Date()
                 installMonitors(screen: screen)
                 updateElapsed()
                 elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -320,7 +327,36 @@ final class RecordingController: NSObject, NSWindowDelegate {
         }
     }
 
-    func stop() { finish(cancel: false) }
+    func stop() {
+        if isFinishing { restartAfterFinish = false; return }
+        finish(cancel: false)
+    }
+
+    func togglePause() {
+        guard isRecording, !isFinishing, !isChangingPause, let recorder else { return }
+        let token = generation
+        let paused = !isPaused
+        isChangingPause = true
+        refreshControls()
+        Task {
+            await recorder.setPaused(paused)
+            guard generation == token, self.recorder === recorder, isRecording else { return }
+            isPaused = paused
+            isChangingPause = false
+            updateElapsed()
+        }
+    }
+
+    func restart() {
+        guard isRecording, !isFinishing, !isChangingPause else { return }
+        finish(cancel: false, action: .restart)
+    }
+
+    func discardRecording() {
+        guard !isFinishing, !isChangingPause else { return }
+        if isRecording { finish(cancel: false, action: .trash) }
+        else { cancel() }
+    }
     func cancel() {
         regionSelector.cancel()
         optionsWindow?.close()
@@ -331,10 +367,11 @@ final class RecordingController: NSObject, NSWindowDelegate {
     @objc private func stopPressed() { stop() }
     @objc private func cancelPressed() { cancel() }
 
-    private func finish(cancel: Bool) {
+    private func finish(cancel: Bool, action: FinishAction = .save) {
         guard !isFinishing else { return }
         generation = UUID()
-        stopCamera()
+        restartAfterFinish = action == .restart
+        if !restartAfterFinish { stopCamera() }
         if isStarting {
             // The startup task owns cleanup until ScreenCaptureKit has finished starting.
             closeControls()
@@ -343,21 +380,43 @@ final class RecordingController: NSObject, NSWindowDelegate {
         guard let recorder else { isStarting = false; closeControls(); return }
         isFinishing = true
         isRecording = false
+        isPaused = false
+        isChangingPause = false
         isStarting = false
         removeMonitors()
         elapsedTimer?.invalidate()
         elapsedTimer = nil
-        status = cancel ? "Annulation…" : "Finalisation…"
+        status = cancel || action == .trash ? "Suppression…" : (action == .restart ? "Nouvelle prise…" : "Finalisation…")
         refreshControls()
         Task {
             do {
+                // Leave the live camera running across takes, but detach the previous writer.
+                if restartAfterFinish { await cameraSource?.setBufferHandler(nil) }
                 let url = try await recorder.finish(cancel: cancel)
                 self.recorder = nil
-                isFinishing = false
-                closeControls()
+                if action == .restart, restartAfterFinish, let screen {
+                    if let url {
+                        do { try onTakeArchived?(url) }
+                        catch { throw RecordingFailure.message("La prise est conservée à \(url.path), mais son ajout à l’historique a échoué : \(error.localizedDescription)") }
+                    }
+                    restartAfterFinish = false
+                    isFinishing = false
+                    beginRecording(on: screen)
+                    return
+                }
+                restartAfterFinish = false
+                stopCamera()
                 if let url {
-                    onCompleted?(url)
+                    if action == .trash {
+                        // The current take stays recoverable in the macOS Trash.
+                        do { try FileManager.default.trashItem(at: url.deletingLastPathComponent(), resultingItemURL: nil) }
+                        catch { throw RecordingFailure.message("La prise est conservée à \(url.path). Impossible de la déplacer dans la corbeille : \(error.localizedDescription)") }
+                    }
+                    isFinishing = false
+                    closeControls()
+                    if action != .trash { onCompleted?(url) }
                     if let warning = recorder.completionWarning ?? RecordingMetadata.read(url)?.warning {
+                        if action == .trash { onStopped?(); return }
                         let alert = NSAlert()
                         alert.messageText = "Vidéo conservée avec un avertissement"
                         alert.informativeText = warning
@@ -365,18 +424,26 @@ final class RecordingController: NSObject, NSWindowDelegate {
                         else { alert.runModal() }
                     }
                 }
-            } catch {
-                self.recorder = nil
                 isFinishing = false
                 closeControls()
-                onError?(error)
+                onStopped?()
+            } catch {
+                self.recorder = nil
+                restartAfterFinish = false
+                stopCamera()
+                isFinishing = false
+                closeControls()
+                if action == .trash, recorder.url.map({ !FileManager.default.fileExists(atPath: $0.path) }) == true {
+                    onStopped?()
+                } else { onError?(error) }
             }
         }
     }
 
     private func refreshControls() {
-        controls.update(status: status, canStop: isRecording, canCancel: !isFinishing,
-                        cameraEnabled: cameraSource != nil)
+        let enabled = isRecording && !isFinishing && !isChangingPause
+        controls.update(status: status, canStop: enabled, canCancel: !isFinishing && !isChangingPause,
+                        canRestart: enabled, canPause: enabled, isPaused: isPaused)
     }
 
     private func closeControls() {
@@ -386,9 +453,20 @@ final class RecordingController: NSObject, NSWindowDelegate {
     }
 
     private func updateElapsed() {
-        let seconds = Int(Date().timeIntervalSince(startedAt ?? Date()))
-        status = String(format: "%02d:%02d", seconds / 60, seconds % 60)
-        refreshControls()
+        guard isRecording, let recorder else { return }
+        let token = generation
+        Task {
+            let elapsed = await recorder.elapsedDuration()
+            guard generation == token, self.recorder === recorder, isRecording else { return }
+            status = Self.elapsedLabel(elapsed)
+            refreshControls()
+        }
+    }
+
+    static func elapsedLabel(_ elapsed: Double) -> String {
+        let seconds = max(0, Int(elapsed.isFinite ? elapsed : 0))
+        if seconds >= 3600 { return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60) }
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     private func installMonitors(screen: NSScreen) {
@@ -400,7 +478,7 @@ final class RecordingController: NSObject, NSWindowDelegate {
     private func removeMonitors() { monitors.forEach(NSEvent.removeMonitor); monitors.removeAll() }
 
     private func record(_ event: NSEvent, screen: NSScreen) {
-        guard isRecording else { return }
+        guard isRecording, !isPaused, !isChangingPause else { return }
         if event.type == .keyDown, options.keys {
             if let label = Self.safeKeyLabel(event) { recorder?.addEvent(label: label) }
         } else if options.clicks, [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {

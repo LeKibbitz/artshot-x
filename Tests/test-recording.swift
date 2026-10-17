@@ -7,6 +7,7 @@ struct RecordingSmokeTest {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("artshot-recording-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
+        try await RecordingPauseChecks.run(in: folder)
         let raw = folder.appendingPathComponent("capture.mov")
         let writer = try AVAssetWriter(outputURL: raw, fileType: .mov)
         func video(_ width: Int, _ height: Int) -> (AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor) {

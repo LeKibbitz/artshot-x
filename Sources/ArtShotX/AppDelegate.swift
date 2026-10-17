@@ -50,6 +50,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.refreshPanel()
             } catch { self.showError(error) }
         }
+        recording.onTakeArchived = { [weak self] url in
+            guard let self else { return }
+            _ = try self.library.add(video: url)
+            self.refreshPanel()
+        }
+        recording.onStopped = { [weak self] in
+            guard let self, self.quitAfterRecording else { return }
+            self.recordingFinishedBeforeQuit()
+        }
         recording.onError = { [weak self] error in
             self?.quitAfterRecording = false
             self?.refreshPanel()
@@ -86,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if exportingCapture || videoPreviews.values.contains(where: { $0.isExporting }) { return .terminateCancel }
         if recording.isFinalizing {
             quitAfterRecording = true
+            recording.stop()
             return .terminateCancel
         }
         guard recording.isRecording else { return .terminateNow }

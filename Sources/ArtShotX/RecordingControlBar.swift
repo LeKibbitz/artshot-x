@@ -3,23 +3,27 @@ import AppKit
 @MainActor
 final class RecordingControlBar: NSObject {
     var onStop: (() -> Void)?
+    var onPauseResume: (() -> Void)?
+    var onRestart: (() -> Void)?
     var onCancel: (() -> Void)?
-    var onShowCamera: (() -> Void)?
     let window: NSPanel
     private let statusLabel = NSTextField(labelWithString: "Préparation…")
     private var stopButton: NSButton!
-    private var cameraButton: NSButton!
+    private var pauseButton: NSButton!
+    private var restartButton: NSButton!
     private var cancelButton: NSButton!
 
     private enum Style {
-        static let size = CGSize(width: 350, height: 54)
-        static let padding: CGFloat = 12
-        static let spacing: CGFloat = 10
-        static let buttonSize: CGFloat = 32
-        static let cornerRadius: CGFloat = 15
+        static let size = CGSize(width: 370, height: 66)
+        static let padding: CGFloat = 16
+        static let spacing: CGFloat = 12
+        static let buttonSize: CGFloat = 34
+        static let timerWidth: CGFloat = 76
+        static let cornerRadius: CGFloat = 33
         static let background = NSColor(white: 0.10, alpha: 0.97)
         static let foreground = NSColor(white: 0.94, alpha: 1)
         static let secondary = NSColor(white: 0.55, alpha: 1)
+        static let separator = NSColor(white: 0.28, alpha: 1)
         static let stop = NSColor(srgbRed: 1, green: 0.30, blue: 0.32, alpha: 1)
     }
 
@@ -27,6 +31,7 @@ final class RecordingControlBar: NSObject {
         window = RecordingBarPanel(contentRect: CGRect(origin: .zero, size: Style.size),
                                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
+        window.title = "ArtShot X · Télécommande"
         window.isReleasedWhenClosed = false
         window.isFloatingPanel = true
         window.hidesOnDeactivate = false
@@ -47,22 +52,30 @@ final class RecordingControlBar: NSObject {
         window.contentView = background
 
         let handle = RecordingDragHandle()
-        handle.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: "Déplacer la barre")
+        handle.image = NSImage(systemSymbolName: "circle.grid.2x2.fill", accessibilityDescription: "Déplacer la télécommande")
         handle.contentTintColor = Style.secondary
-        handle.toolTip = "Déplacer la barre"
-        handle.setAccessibilityLabel("Déplacer la barre d’enregistrement")
+        handle.toolTip = "Déplacer la télécommande"
+        handle.setAccessibilityLabel("Déplacer la télécommande d’enregistrement")
         handle.translatesAutoresizingMaskIntoConstraints = false
         handle.widthAnchor.constraint(equalToConstant: 18).isActive = true
         handle.heightAnchor.constraint(equalToConstant: Style.buttonSize).isActive = true
-        statusLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        statusLabel.textColor = Style.foreground
+        statusLabel.font = .monospacedDigitSystemFont(ofSize: 18, weight: .semibold)
+        statusLabel.textColor = Style.stop
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setAccessibilityLabel("Durée et état de l’enregistrement")
-        stopButton = makeButton(symbol: "stop.fill", label: "Arrêter l’enregistrement", action: #selector(stop))
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.widthAnchor.constraint(equalToConstant: Style.timerWidth).isActive = true
+        stopButton = makeButton(symbol: "stop.circle", label: "Arrêter l’enregistrement", action: #selector(stop))
         stopButton.contentTintColor = Style.stop
-        cameraButton = makeButton(symbol: "video.fill", label: "Afficher la caméra", action: #selector(showCamera))
-        cancelButton = makeButton(symbol: "xmark", label: "Annuler l’enregistrement", action: #selector(cancel))
-        let stack = NSStackView(views: [handle, statusLabel, stopButton, cameraButton, cancelButton])
+        let recording = NSStackView(views: [stopButton, statusLabel])
+        recording.orientation = .horizontal
+        recording.alignment = .centerY
+        recording.spacing = 8
+        pauseButton = makeButton(symbol: "pause.circle", label: "Pause", action: #selector(pauseResume))
+        restartButton = makeButton(symbol: "arrow.counterclockwise", label: "Recommencer l’enregistrement", action: #selector(restart))
+        cancelButton = makeButton(symbol: "trash", label: "Supprimer l’enregistrement", action: #selector(cancel))
+        let stack = NSStackView(views: [recording, makeSeparator(), pauseButton, makeSeparator(),
+                                        restartButton, makeSeparator(), cancelButton, makeSeparator(), handle])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = Style.spacing
@@ -74,9 +87,11 @@ final class RecordingControlBar: NSObject {
             stack.centerYAnchor.constraint(equalTo: background.centerYAnchor),
             stack.heightAnchor.constraint(equalToConstant: Style.buttonSize)
         ])
-        update(status: "Préparation…", canStop: false, canCancel: true, cameraEnabled: false)
-        stopButton.nextKeyView = cameraButton
-        cameraButton.nextKeyView = cancelButton
+        update(status: "Préparation…", canStop: false, canCancel: true,
+               canRestart: false, canPause: false, isPaused: false)
+        stopButton.nextKeyView = pauseButton
+        pauseButton.nextKeyView = restartButton
+        restartButton.nextKeyView = cancelButton
         cancelButton.nextKeyView = stopButton
     }
 
@@ -89,19 +104,24 @@ final class RecordingControlBar: NSObject {
         window.orderFrontRegardless()
     }
 
-    func update(status: String, canStop: Bool, canCancel: Bool, cameraEnabled: Bool) {
+    func update(status: String, canStop: Bool, canCancel: Bool, canRestart: Bool, canPause: Bool, isPaused: Bool) {
         statusLabel.stringValue = status
         statusLabel.toolTip = status
         stopButton.isEnabled = canStop
         cancelButton.isEnabled = canCancel
-        cameraButton.isEnabled = cameraEnabled
-        window.initialFirstResponder = canStop ? stopButton : (canCancel ? cancelButton : cameraButton)
+        restartButton.isEnabled = canRestart
+        pauseButton.isEnabled = canPause
+        let pauseLabel = isPaused ? "Reprendre" : "Pause"
+        pauseButton.image = symbol(isPaused ? "play.circle" : "pause.circle", label: pauseLabel)
+        pauseButton.toolTip = pauseLabel
+        pauseButton.setAccessibilityLabel(pauseLabel)
+        window.initialFirstResponder = [stopButton!, pauseButton!, restartButton!, cancelButton!].first { $0.isEnabled }
     }
 
     func close() { window.orderOut(nil) }
 
     private func makeButton(symbol: String, label: String, action: Selector) -> NSButton {
-        let button = RecordingBarButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage(),
+        let button = RecordingBarButton(image: self.symbol(symbol, label: label),
                               target: self, action: action)
         button.isBordered = false
         button.imagePosition = .imageOnly
@@ -114,9 +134,25 @@ final class RecordingControlBar: NSObject {
         return button
     }
 
+    private func symbol(_ name: String, label: String) -> NSImage {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: label) ?? NSImage()
+        return image.withSymbolConfiguration(.init(pointSize: 25, weight: .regular)) ?? image
+    }
+
+    private func makeSeparator() -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = Style.separator.cgColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        view.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        return view
+    }
+
     @objc private func stop() { onStop?() }
     @objc private func cancel() { onCancel?() }
-    @objc private func showCamera() { onShowCamera?() }
+    @objc private func pauseResume() { onPauseResume?() }
+    @objc private func restart() { onRestart?() }
 }
 
 @MainActor

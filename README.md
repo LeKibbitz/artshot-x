@@ -2,7 +2,7 @@
 
 A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
-## Version 0.3.0 · build 4
+## Version 0.4.0 · build 5
 
 - Capture the display under your pointer or select a region.
 - Get a floating thumbnail at the bottom left, with **Delete**, **Edit**, **Save** and **Copy** actions. Copy is available for images.
@@ -11,7 +11,7 @@ A local, open-source screenshot and screen recording utility for macOS. Built wi
 - Stitch a vertical scrolling screenshot while you scroll the underlying app manually.
 - Record a display or region, optionally with live camera, system audio, microphone, click indicators and shortcut labels.
 - Preview the camera before recording; choose a circle, square or rounded rectangle, adjust its size and drag it into position. One fixed layout applies to the entire video.
-- Use a compact horizontal recording bar for elapsed time, Stop, Cancel and showing the camera. Command–Option–Shift–7 brings it back during recording.
+- Use a floating recording remote with Stop and a red timer, Pause/Resume, Restart, Trash and a drag handle on the right. Command–Option–Shift–7 brings it back during recording.
 - Edit a recording by toggling captured sources and effects, trimming its start/end and exporting an MP4 with one mixed audio track. The cursor, when enabled, is baked into the screen video.
 
 The app runs in the background with a menu bar icon. Launching it does not open a panel or editor. The interface is currently in French. GIF export, OCR and window-specific capture are not included.
@@ -46,6 +46,8 @@ For a region, drag to select, press Return to confirm or Escape to cancel. Selec
 
 Enable the camera in the recording options to see its live preview. Choose its shape and size, then drag it within the selected display or region. The setting is saved as a single layout for the recording; there is no animated camera movement or timeline of layout changes. Its last setup is remembered for the next recording. Camera controls are locked once recording starts.
 
+The timer counts recorded time and stops while paused. Resume continues the same take without keeping the paused interval in the recording. Restart saves the previous take in recent captures and starts a new take from zero with the same display/region, sources and fixed camera layout. The live camera session stays available between takes. Trash ends the current take and moves its recording project to macOS Trash without adding it to history; earlier saved takes are retained.
+
 After recording, choose **Modifier** on the thumbnail to open the video editor. Camera and audio sources are retained as separate tracks in the original MOV; click and shortcut indicators are stored as event metadata. Only special keys and Command shortcuts receive labels; ordinary typed text is not recorded as keyboard events. Screen video still contains whatever is visibly displayed. Sources not selected at recording time cannot be added later.
 
 Recent originals are stored under `~/Library/Application Support/ArtShot X/`. Image annotations and video edit choices are session-local; exported PNGs and MP4s contain the applied edits. The menu offers recent captures and a Finder shortcut to local storage.
@@ -54,7 +56,7 @@ Recent originals are stored under `~/Library/Application Support/ArtShot X/`. Im
 
 The build script creates an app signed locally with an ad-hoc signature by default. It is not a notarized distribution build. Ad-hoc rebuilds can invalidate macOS capture permissions even while the Settings switch remains enabled. To reuse an existing stable development signing identity, set `ARTSHOT_SIGNING_IDENTITY` when running the build script; the script does not create or install certificates.
 
-Automated checks cover geometry, image editing, stitching, persistence, camera shapes/placement, overlay controls and video export. Earlier version 0.2.0 acceptance verified a native-resolution screenshot and a recording with camera, system audio and microphone, followed by MP4 export. The user confirmed the new 0.3.0 live camera thumbnail and its controls on their Mac. A new 18.53-second screen/camera capture also verified the recording toolbar Stop action and the transition from preview to recording. Multi-display behavior, audiovisual synchronization and live scrolling also need broader acceptance.
+Automated checks cover geometry, image editing, stitching, persistence, camera shapes/placement, overlay controls and video export. Earlier version 0.2.0 acceptance verified a native-resolution screenshot and a recording with camera, system audio and microphone, followed by MP4 export. Version 0.3.0 acceptance confirmed the live camera thumbnail and its controls, plus an 18.53-second screen/camera take stopped through the toolbar. The new 0.4.0 Pause/Resume, Restart and Trash workflows still require hardware acceptance. Multi-display behavior, audiovisual synchronization and live scrolling also need broader acceptance.
 
 Processing stays on your Mac. There are no accounts, uploads, analytics or remote services. Private reference media and research notes are excluded from this repository.
 

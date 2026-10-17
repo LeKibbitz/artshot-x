@@ -100,10 +100,11 @@ import AppKit
         precondition(!camera.window.canBecomeKey && camera.window.sharingType == .none && camera.window.ignoresMouseEvents,
                      "Camera can take keyboard focus or appear in the captured screen")
 
-        var stopped = 0, cancelled = 0, revealed = 0
+        var stopped = 0, cancelled = 0, paused = 0, restarted = 0
         bar.onStop = { stopped += 1 }
         bar.onCancel = { cancelled += 1 }
-        bar.onShowCamera = { revealed += 1 }
+        bar.onPauseResume = { paused += 1 }
+        bar.onRestart = { restarted += 1 }
         bar.show(on: screen)
         bar.window.contentView!.layoutSubtreeIfNeeded()
         precondition(NSApp.keyWindow === previousKey && NSWorkspace.shared.frontmostApplication?.processIdentifier == previousApp,
@@ -111,38 +112,78 @@ import AppKit
         precondition(bar.window.styleMask.contains(.nonactivatingPanel) && bar.window.sharingType == .none
                      && bar.window.frame.width > bar.window.frame.height * 4,
                      "Recording bar is not compact, nonactivating or excluded from capture")
+        precondition(bar.window.title == "ArtShot X · Télécommande", "Recording remote has no accessibility window title")
         let userPosition = CGPoint(x: bar.window.frame.minX + 23, y: bar.window.frame.minY - 17)
         bar.window.setFrameOrigin(userPosition)
         bar.show(on: screen)
         precondition(bar.window.frame.origin == userPosition, "Revealing the recording bar reset its dragged position")
         func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
         let buttons = descendants(bar.window.contentView!).compactMap { $0 as? NSButton }
-        precondition(buttons.count == 3, "Recording bar lost actions or added unsupported controls")
+        precondition(buttons.count == 4, "Recording remote lost Stop, Pause, Restart or Delete")
         func button(_ label: String) -> NSButton { buttons.first { $0.toolTip == label }! }
-        for status in ["Préparation…", "● 12:34", "Finalisation de l’enregistrement…"] {
-            bar.update(status: status, canStop: false, canCancel: true, cameraEnabled: false)
+        for status in ["Préparation…", "0:05", "12:34", "1:02:03", "Finalisation de l’enregistrement…"] {
+            bar.update(status: status, canStop: false, canCancel: true, canRestart: false, canPause: false, isPaused: false)
             bar.window.contentView!.layoutSubtreeIfNeeded()
             for control in descendants(bar.window.contentView!).filter({ $0 is NSButton || $0 is NSTextField }) {
                 let frame = control.convert(control.bounds, to: bar.window.contentView)
                 precondition(!control.hasAmbiguousLayout && frame.width > 0 && frame.height > 0
                              && bar.window.contentView!.bounds.contains(frame), "Recording bar clips or ambiguously lays out a control")
             }
+            let label = descendants(bar.window.contentView!).compactMap { $0 as? NSTextField }.first!
+            precondition(label.stringValue == status && label.textColor!.redComponent > label.textColor!.greenComponent,
+                         "Recording timer lost its status or red styling")
+            if status == "1:02:03" {
+                let textWidth = status.size(withAttributes: [.font: label.font!]).width
+                precondition(textWidth <= label.bounds.width, "Hour-long recording timer is truncated")
+            }
         }
         button("Arrêter l’enregistrement").performClick(nil)
-        button("Afficher la caméra").performClick(nil)
-        button("Annuler l’enregistrement").performClick(nil)
-        precondition(stopped == 0 && revealed == 0 && cancelled == 1, "Disabled recording actions still dispatch")
-        bar.update(status: "● 00:01", canStop: true, canCancel: true, cameraEnabled: true)
+        button("Pause").performClick(nil)
+        button("Recommencer l’enregistrement").performClick(nil)
+        button("Supprimer l’enregistrement").performClick(nil)
+        precondition(stopped == 0 && paused == 0 && restarted == 0 && cancelled == 1, "Disabled recording actions still dispatch")
+        bar.update(status: "0:05", canStop: true, canCancel: true, canRestart: true, canPause: true, isPaused: false)
         precondition(buttons.allSatisfy(\.acceptsFirstResponder), "Recording buttons are not keyboard focusable")
         let stop = button("Arrêter l’enregistrement")
         precondition(bar.window.makeFirstResponder(stop), "Recording Stop cannot receive keyboard focus")
         bar.window.selectNextKeyView(stop)
-        precondition(bar.window.firstResponder === button("Afficher la caméra"), "Recording bar keyboard navigation is broken")
+        precondition(bar.window.firstResponder === button("Pause"), "Recording remote keyboard navigation is broken")
         buttons.forEach { $0.performClick(nil) }
-        precondition(stopped == 1 && revealed == 1 && cancelled == 2, "Recording buttons failed to dispatch callbacks")
+        precondition(stopped == 1 && paused == 1 && restarted == 1 && cancelled == 2, "Recording buttons failed to dispatch callbacks")
+        let pauseImage = button("Pause").image
+        bar.update(status: "0:05", canStop: true, canCancel: true, canRestart: true, canPause: true, isPaused: true)
+        let resume = button("Reprendre")
+        precondition(resume.accessibilityLabel() == "Reprendre" && resume.image !== pauseImage,
+                     "Paused remote did not switch to Reprendre and its play icon")
+        resume.performClick(nil)
+        precondition(paused == 2, "Resume did not use the Pause/Resume callback")
+        bar.update(status: "Finalisation…", canStop: false, canCancel: false, canRestart: false, canPause: false, isPaused: false)
+        buttons.forEach { $0.performClick(nil) }
+        precondition(stopped == 1 && paused == 2 && restarted == 1 && cancelled == 2,
+                     "Finalization left destructive recording actions enabled")
+        bar.update(status: "0:05", canStop: true, canCancel: true, canRestart: true, canPause: false, isPaused: false)
+        _ = bar.window.makeFirstResponder(stop)
+        bar.window.selectNextKeyView(stop)
+        precondition(bar.window.firstResponder === button("Recommencer l’enregistrement"),
+                     "Keyboard navigation failed to skip disabled Pause")
+        bar.update(status: "0:05", canStop: true, canCancel: true, canRestart: true, canPause: true, isPaused: false)
+        let ordered = buttons.map { $0.convert($0.bounds, to: bar.window.contentView).midX }
+        precondition(zip(ordered, ordered.dropFirst()).allSatisfy { $0 < $1 }, "Remote actions are not ordered Stop, Pause, Restart, Delete")
+        let handle = descendants(bar.window.contentView!).compactMap { $0 as? NSImageView }.first { $0.toolTip == "Déplacer la télécommande" }!
+        precondition(handle.image != nil, "Remote drag handle has no visible symbol")
+        precondition(handle.convert(handle.bounds, to: bar.window.contentView).midX > ordered.last!, "Remote drag handle is not at the right end")
+        if let path = ProcessInfo.processInfo.environment["ARTSHOT_OVERLAY_SNAPSHOT_DIR"] {
+            let directory = URL(fileURLWithPath: path, isDirectory: true)
+            try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let content = bar.window.contentView!
+            content.layoutSubtreeIfNeeded()
+            let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds)!
+            content.cacheDisplay(in: content.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent("recording-control-bar.png"))
+        }
         bar.close()
         camera.close()
         precondition(!bar.window.isVisible && !camera.window.isVisible, "Recording overlays remain visible after close")
-        print("PASS: camera shapes/clipping; aspect-fill without mirror; placeholder; top-left placement; drag/clamping/locked layout; nonactivation; compact recording bar layout/states/callbacks; close")
+        print("PASS: camera shapes/clipping; aspect-fill without mirror; placeholder; top-left placement; drag/clamping/locked layout; nonactivation; segmented remote layout; hour timer; Pause/Resume/Restart/Delete/Stop callbacks; keyboard navigation; disabled finalization; close")
     }
 }

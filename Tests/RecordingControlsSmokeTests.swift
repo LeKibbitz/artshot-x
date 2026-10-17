@@ -19,22 +19,37 @@ extension RecordingController {
         precondition(controller.revealActiveControls() && controller.optionsWindow === window)
         controller.cancel()
         precondition(!controller.isBusy && !controller.revealActiveControls())
+        for (seconds, label) in [(0.0, "0:00"), (5, "0:05"), (65, "1:05"), (3723, "1:02:03"), (-5, "0:00"), (Double.nan, "0:00")] {
+            precondition(RecordingController.elapsedLabel(seconds) == label, "Incorrect elapsed time label")
+        }
         // Simulate an established recording: shortcut 7 must reveal the bar without an options panel.
         controller.isRecording = true
-        controller.status = "00:09"
+        controller.status = "0:09"
         precondition(controller.revealActiveControls())
         precondition(controller.controls.window.isVisible && controller.optionsWindow == nil)
         precondition(controller.controls.window.styleMask.contains(.borderless))
+        let buttons = descendants(controller.controls.window.contentView!).compactMap { $0 as? NSButton }
+        precondition(buttons.count == 4 && buttons.allSatisfy(\.isEnabled))
+        controller.isPaused = true
+        controller.refreshControls()
+        precondition(buttons.contains { $0.accessibilityLabel() == "Reprendre" }, "Pause must offer Resume")
+        controller.isChangingPause = true
+        controller.refreshControls()
+        precondition(buttons.allSatisfy { !$0.isEnabled }, "Pause transition must prevent competing actions")
+        controller.isChangingPause = false
+        controller.isPaused = false
         controller.isRecording = false
         controller.isFinishing = true
         controller.status = "Finalisation…"
         precondition(controller.revealActiveControls())
-        let buttons = descendants(controller.controls.window.contentView!).compactMap { $0 as? NSButton }
         precondition(!buttons.isEmpty && buttons.allSatisfy { !$0.isEnabled }, "Finalization must disable recording actions")
+        controller.restartAfterFinish = true
+        controller.stop()
+        precondition(!controller.restartAfterFinish, "Quitting during finalization must cancel automatic restart")
         controller.isFinishing = false
         controller.closeControls()
         precondition(!controller.controls.window.isVisible)
-        print("PASS: recording options layout, idle/recording shortcut routing, finalization controls and cleanup")
+        print("PASS: options layout, shortcut routing, elapsed labels, pause controls, restart cancellation and cleanup")
     }
 }
 

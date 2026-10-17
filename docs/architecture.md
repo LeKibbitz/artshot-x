@@ -1,4 +1,4 @@
-# ArtShot X 0.3.0 architecture · build 4
+# ArtShot X 0.4.0 architecture · build 5
 
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
@@ -12,8 +12,9 @@ ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creat
 | `QuickAccessController` | Bottom-left thumbnail with delete/edit/save/copy actions; image copying only. |
 | `CaptureLibrary` | Atomic local index and persistent screenshot/recording originals. |
 | `AnnotationCanvas` / `PreviewWindowController` | Arrow, rectangle and numbered-step annotations, undo, PNG export and clipboard copying. |
-| `RecordingController` / `ScreenRecorder` | Recording options, permissions, fixed camera setup, screen capture and independent media tracks. |
+| `RecordingController` / `ScreenRecorder` | Recording lifecycle, pause/resume, take restart/discard, fixed camera setup and independent media tracks. |
 | `LiveCameraSource` | One camera session feeds both the live preview and the original camera video track. |
+| `RecordingTimeline` | Host-clock pause intervals, compressed media/event timestamps and PCM trimming across pause boundaries. |
 | `CameraOverlayController` / `RecordingControlBar` | Nonactivating live camera preview and compact horizontal recording controls. |
 | `CameraLayout` / `CameraVideoCompositor` | Normalized camera placement, circle/square/rounded masks and a shared playback/export renderer. |
 | `RecordingComposition` / `VideoPreviewWindowController` | Source/effect toggles, trimming, preview and MP4 export. |
@@ -36,7 +37,13 @@ The live camera can be configured before recording as a circle, square or rounde
 
 The camera layout is frozen at recording start and saved in the recording metadata. A single shape, size and position applies to the whole video; there are no per-frame transforms or layout keyframes. UserDefaults remembers the last setup for future recordings. The camera window and control bar are excluded from screen capture along with other ArtShot X windows; the independent camera track is composed later. The locked camera overlay lets mouse events pass through to the underlying app.
 
-During recording, Command–Option–Shift–7 reveals a compact horizontal bar rather than the capture panel. The bar provides elapsed time, Stop, Cancel and a camera reveal action. It can be moved independently without changing the fixed camera layout.
+During recording, Command–Option–Shift–7 reveals a floating horizontal remote rather than the capture panel. It provides Stop with a red recorded-time display, Pause/Resume, Restart, Trash and a drag handle at the right. It can be moved independently without changing the fixed camera layout.
+
+Pause suspends media writing and event recording for the take. `RecordingTimeline` retains the original host-clock pause intervals so late audio/event callbacks can still be classified. Resume removes those intervals from screen, camera, audio and event timestamps; PCM buffers crossing a pause boundary are split and trimmed. The visible timer reads the same timeline. Screen and camera capture stay available for the live preview, and stopping while paused ends at the last written video frame.
+
+Restart finalizes the previous take and archives it through a separate library callback before starting another recorder. It does not display a result thumbnail between takes. Display, selected region, enabled sources and fixed camera layout are retained; the elapsed time resets. The existing live camera source is detached from the old recorder and bound to the new one instead of reopening camera hardware.
+
+Trash finalizes the current take, moves its app-owned project folder to macOS Trash and leaves it out of capture history. It then closes the recording UI and stops the camera. Previously archived takes remain in history. Stop follows the normal completion path and presents the result thumbnail.
 
 Click positions are normalized within the selected capture area. Shortcut labels include special keys and Command shortcuts, using the current keyboard layout; ordinary typed characters are not stored as keyboard events. Enabling these overlays requests Accessibility access. A selected cursor is rendered by ScreenCaptureKit into the screen video and cannot be removed in the editor.
 
@@ -48,4 +55,4 @@ The video editor builds an AVFoundation composition for source toggles and start
 
 No server, database, login or network upload is involved. There is no durable annotation/edit project format yet. The app uses public macOS APIs and requires macOS 14 or newer.
 
-Synthetic tests cover geometry, annotations, stitching, persistence, camera masks and placement, overlay controls, media composition and export. Earlier 0.2.0 hardware acceptance is recorded in the testing document. Version 0.3.0 live camera setup and a recording stopped through the toolbar were exercised on the built-in display. Audiovisual synchronization, external display layouts and device failures require broader manual acceptance.
+Synthetic tests cover geometry, annotations, stitching, persistence, camera masks and placement, overlay controls, media composition and export. Earlier 0.2.0 hardware acceptance is recorded in the testing document. Version 0.3.0 live camera setup and a recording stopped through the toolbar were exercised on the built-in display. The new 0.4.0 pause/resume timeline, restart lifecycle and recording Trash workflow require hardware acceptance. Audiovisual synchronization, external display layouts and device failures require broader manual acceptance.

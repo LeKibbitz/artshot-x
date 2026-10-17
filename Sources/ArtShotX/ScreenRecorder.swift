@@ -35,7 +35,7 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
     private(set) var completionWarning: String?
 
     @MainActor
-    func start(displayID: CGDirectDisplayID, sourceRect: CGRect?, options: RecordingOptions) async throws {
+    func start(displayID: CGDirectDisplayID, sourceRect: CGRect?, options: RecordingOptions, externalCamera: Bool = false) async throws {
         self.options = options
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
@@ -61,7 +61,9 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
         configuration.sampleRate = 48000
         configuration.channelCount = 2
         try prepareWriter(options: options)
-        if options.camera || options.microphone { try prepareDevices(options: options) }
+        var deviceOptions = options
+        if externalCamera { deviceOptions.camera = false }
+        if deviceOptions.camera || deviceOptions.microphone { try prepareDevices(options: deviceOptions) }
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         self.stream = stream
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
@@ -168,6 +170,14 @@ final class ScreenRecorder: NSObject, @unchecked Sendable, SCStreamOutput, SCStr
         guard active else { return }
         if output is AVCaptureVideoDataOutput { cameraImage = CMSampleBufferGetImageBuffer(sampleBuffer) }
         else { appendAudio(sampleBuffer, input: micInput, system: false) }
+    }
+
+    func receiveCameraFrame(_ frame: CVPixelBuffer) {
+        queue.async { self.cameraImage = frame }
+    }
+
+    func cameraFailed(_ error: Error) {
+        queue.async { self.fail(error) }
     }
 
     private func appendAudio(_ buffer: CMSampleBuffer, input: AVAssetWriterInput?, system: Bool) {

@@ -14,9 +14,15 @@ final class RecordingController: NSObject, NSWindowDelegate {
     private var isFinishing = false { didSet { onStateChanged?() } }
     private var isSelecting = false { didSet { onStateChanged?() } }
     private var generation = UUID()
+    private var startupFailure: Error?
     private var recorder: ScreenRecorder?
     private var optionsWindow: NSWindow?
-    private var controlsWindow: NSPanel?
+    private let controls = RecordingControlBar()
+    private let cameraOverlay = CameraOverlayController()
+    private var cameraSource: LiveCameraSource?
+    private var cameraGeneration = UUID()
+    private var cameraReady = false
+    private var cameraLayout = CameraLayout.default
     private var screen: NSScreen?
     private let regionSelector = SelectionOverlayController()
     private var monitors: [Any] = []
@@ -31,14 +37,69 @@ final class RecordingController: NSObject, NSWindowDelegate {
     private let keysButton = NSButton(checkboxWithTitle: "Afficher les raccourcis et touches spéciales", target: nil, action: nil)
     private var elapsedTimer: Timer?
     private var startedAt: Date?
-    private let statusLabel = NSTextField(labelWithString: "Préparation…")
+    private let startButton = NSButton(title: "Démarrer", target: nil, action: nil)
+    private let shapeControl = NSSegmentedControl(labels: ["Rond", "Carré", "Arrondi"], trackingMode: .selectOne, target: nil, action: nil)
+    private let sizeControl = NSSlider(value: 0.23, minValue: 0.12, maxValue: 0.45, target: nil, action: nil)
+    private let sizeLabel = NSTextField(labelWithString: "23 %")
+    private let cameraStatus = NSTextField(wrappingLabelWithString: "")
+    private var status = "Préparation…"
+    private enum Style {
+        static let optionsSize = CGSize(width: 470, height: 590)
+        static let inset: CGFloat = 24
+        static let spacing: CGFloat = 14
+        static let sliderWidth: CGFloat = 180
+    }
+
+    override init() {
+        super.init()
+        if let data = UserDefaults.standard.data(forKey: "recording.cameraLayout"),
+           let saved = try? JSONDecoder().decode(CameraLayout.self, from: data) { cameraLayout = saved }
+        controls.onStop = { [weak self] in self?.stop() }
+        controls.onCancel = { [weak self] in self?.cancel() }
+        controls.onShowCamera = { [weak self] in self?.showCamera(editable: false) }
+        cameraOverlay.onLayoutChanged = { [weak self] layout in
+            guard let self, !self.isRecording, !self.isStarting else { return }
+            self.cameraLayout = layout
+            self.saveCameraLayout()
+        }
+        cameraButton.target = self
+        cameraButton.action = #selector(cameraToggled)
+        regionButton.target = self
+        regionButton.action = #selector(regionToggled)
+        shapeControl.target = self
+        shapeControl.action = #selector(layoutChanged)
+        sizeControl.target = self
+        sizeControl.action = #selector(layoutChanged)
+        sizeControl.isContinuous = true
+        sizeControl.widthAnchor.constraint(equalToConstant: Style.sliderWidth).isActive = true
+        sizeControl.setAccessibilityLabel("Taille de la vignette caméra")
+        shapeControl.setAccessibilityLabel("Forme de la vignette caméra")
+        startButton.target = self
+        startButton.action = #selector(startPressed)
+    }
+
+    /// The same command behind shortcut 7 reveals the active recording controls.
+    @discardableResult
+    func revealActiveControls() -> Bool {
+        if isStarting || isRecording || isFinishing {
+            if let screen { controls.show(on: screen); refreshControls() }
+            showCamera(editable: false)
+            return true
+        }
+        if let optionsWindow {
+            optionsWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return true
+        }
+        return isSelecting
+    }
 
     func present(on screen: NSScreen) {
-        if isRecording { controlsWindow?.orderFrontRegardless(); return }
-        guard !isStarting, !isFinishing else { return }
+        if revealActiveControls() { return }
         self.screen = screen
-        if let optionsWindow { optionsWindow.makeKeyAndOrderFront(nil); return }
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 450, height: 430), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        sourceRegion = nil
+        regionButton.state = .off
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Style.optionsSize), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Enregistrer une vidéo"
         window.isReleasedWhenClosed = false
         window.sharingType = .none
@@ -49,62 +110,147 @@ final class RecordingController: NSObject, NSWindowDelegate {
         let note = NSTextField(wrappingLabelWithString: "Caméra, sons, clics et raccourcis restent modifiables dans l’éditeur. Le curseur est intégré à la vidéo. Aucun texte saisi n’est enregistré.")
         note.font = .systemFont(ofSize: 12)
         note.textColor = .secondaryLabelColor
-        let start = NSButton(title: "Démarrer", target: self, action: #selector(startPressed))
-        start.bezelStyle = .rounded
-        start.keyEquivalent = "\r"
+        startButton.bezelStyle = .rounded
+        startButton.keyEquivalent = "\r"
         let cancel = NSButton(title: "Annuler", target: self, action: #selector(cancelPressed))
         cancel.bezelStyle = .rounded
         cancel.keyEquivalent = "\u{1b}"
-        let buttons = NSStackView(views: [cancel, start])
+        let buttons = NSStackView(views: [cancel, startButton])
         buttons.orientation = .horizontal
         buttons.spacing = 12
-        let stack = NSStackView(views: [headline, regionButton, cameraButton, microphoneButton, systemButton, cursorButton, clicksButton, keysButton, note, buttons])
+        shapeControl.selectedSegment = CameraShape.allCases.firstIndex(of: cameraLayout.shape) ?? 2
+        sizeControl.doubleValue = cameraLayout.widthFraction
+        sizeLabel.stringValue = "\(Int(sizeControl.doubleValue * 100)) %"
+        let sizing = NSStackView(views: [NSTextField(labelWithString: "Taille"), sizeControl, sizeLabel])
+        sizing.orientation = .horizontal
+        cameraStatus.font = .systemFont(ofSize: 12)
+        cameraStatus.textColor = .secondaryLabelColor
+        let stack = NSStackView(views: [headline, regionButton, cameraButton, shapeControl, sizing, cameraStatus, microphoneButton, systemButton, cursorButton, clicksButton, keysButton, note, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 14
+        stack.spacing = Style.spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         window.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -24)
+            stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: Style.inset),
+            stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -Style.inset),
+            stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: Style.inset),
+            stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -Style.inset)
         ])
         optionsWindow = window
         onStateChanged?()
         window.center()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        cameraToggled()
+    }
+
+    @objc private func layoutChanged() {
+        guard !isStarting, !isRecording else { return }
+        cameraLayout.shape = CameraShape.allCases[max(0, shapeControl.selectedSegment)]
+        cameraLayout.widthFraction = sizeControl.doubleValue
+        sizeLabel.stringValue = "\(Int(sizeControl.doubleValue * 100)) %"
+        saveCameraLayout()
+        showCamera(editable: true)
+    }
+
+    private func saveCameraLayout() {
+        if let data = try? JSONEncoder().encode(cameraLayout) { UserDefaults.standard.set(data, forKey: "recording.cameraLayout") }
+    }
+
+    private func showCamera(editable: Bool) {
+        guard cameraSource != nil, let screen else { return }
+        cameraOverlay.show(in: sourceRegion ?? screen.frame, layout: cameraLayout, editable: editable)
+    }
+
+    @objc private func cameraToggled() {
+        let enabled = cameraButton.state == .on
+        shapeControl.isEnabled = enabled
+        sizeControl.isEnabled = enabled
+        stopCamera()
+        startButton.isEnabled = !enabled
+        cameraStatus.stringValue = enabled ? "Ouverture de la caméra…" : "Activez la caméra pour régler sa vignette avant de démarrer."
+        guard enabled, optionsWindow != nil else { return }
+        let token = UUID()
+        cameraGeneration = token
+        let source = LiveCameraSource(onImage: { [weak self] image in
+            guard let self, self.cameraGeneration == token else { return }
+            self.cameraReady = true
+            self.cameraOverlay.update(image: image)
+            self.startButton.isEnabled = true
+            self.cameraStatus.stringValue = "Déplacez la vignette à l’endroit souhaité. Ce réglage sera conservé dans toute la vidéo."
+        }, onFailure: { [weak self] error in
+            guard let self, self.cameraGeneration == token else { return }
+            self.cameraReady = false
+            self.startButton.isEnabled = false
+            self.cameraStatus.stringValue = error.localizedDescription
+            if self.isRecording || self.isStarting { self.recorder?.cameraFailed(error) }
+            self.stopCamera()
+        })
+        cameraSource = source
+        showCamera(editable: true)
+        Task {
+            do {
+                try await authorize(.video, name: "caméra")
+                guard cameraGeneration == token else { return }
+                try await source.start()
+                if cameraGeneration != token { await source.stop() }
+            } catch {
+                guard cameraGeneration == token else { return }
+                cameraStatus.stringValue = error.localizedDescription
+                stopCamera()
+            }
+        }
+    }
+
+    private func stopCamera() {
+        cameraGeneration = UUID()
+        cameraReady = false
+        let source = cameraSource
+        cameraSource = nil
+        cameraOverlay.close()
+        if let source { Task { await source.stop() } }
+    }
+
+    @objc private func regionToggled() {
+        guard let screen else { return }
+        guard regionButton.state == .on else { sourceRegion = nil; showCamera(editable: true); return }
+        isSelecting = true
+        optionsWindow?.orderOut(nil)
+        cameraOverlay.close()
+        regionSelector.begin(on: screen) { [weak self] rect in
+            guard let self else { return }
+            self.isSelecting = false
+            self.sourceRegion = rect
+            if rect == nil { self.regionButton.state = .off }
+            self.optionsWindow?.makeKeyAndOrderFront(nil)
+            self.showCamera(editable: true)
+        }
     }
 
     @objc private func startPressed() {
-        guard let screen, !isStarting else { return }
+        guard let screen, !isStarting, cameraButton.state != .on || cameraReady else { return }
         options = RecordingOptions(camera: cameraButton.state == .on, microphone: microphoneButton.state == .on, systemAudio: systemButton.state == .on, cursor: cursorButton.state == .on, clicks: clicksButton.state == .on, keys: keysButton.state == .on)
-        optionsWindow?.orderOut(nil)
-        optionsWindow?.close()
+        options.cameraLayout = cameraLayout
+        let window = optionsWindow
         optionsWindow = nil
-        if regionButton.state == .on {
-            isSelecting = true
-            regionSelector.begin(on: screen) { [weak self] rect in
-                guard let self else { return }
-                self.isSelecting = false
-                guard let rect else { return }
-                self.sourceRegion = rect
-                self.beginRecording(on: screen)
-            }
-        } else { sourceRegion = nil; beginRecording(on: screen) }
+        window?.close()
+        showCamera(editable: false)
+        beginRecording(on: screen)
     }
 
     private func beginRecording(on screen: NSScreen) {
         let token = UUID()
         generation = token
+        startupFailure = nil
         isStarting = true
-        showControls(on: screen)
+        status = "Préparation…"
+        controls.show(on: screen)
+        refreshControls()
         Task {
             let recorder = ScreenRecorder()
             self.recorder = recorder
             do {
-                if options.camera { try await authorize(.video, name: "caméra") }
                 if options.microphone { try await authorize(.audio, name: "microphone") }
                 guard generation == token else {
                     isStarting = false
@@ -128,17 +274,23 @@ final class RecordingController: NSObject, NSWindowDelegate {
                 }
                 recorder.onFailure = { [weak self] error in
                     Task { @MainActor in
-                        guard let self, !self.isFinishing else { return }
+                        guard let self, self.generation == token, !self.isFinishing else { return }
+                        if self.isStarting { self.startupFailure = error; return }
                         self.finish(cancel: false)
                     }
                 }
-                try await recorder.start(displayID: id.uint32Value, sourceRect: rect, options: options)
+                if options.camera {
+                    guard cameraReady, let cameraSource else { throw RecordingFailure.message("La caméra n’est plus disponible.") }
+                    await cameraSource.setBufferHandler { [weak recorder] frame in recorder?.receiveCameraFrame(frame) }
+                }
+                try await recorder.start(displayID: id.uint32Value, sourceRect: rect, options: options, externalCamera: options.camera)
                 guard generation == token else {
                     _ = try? await recorder.finish(cancel: true)
                     isStarting = false
                     self.recorder = nil
                     return
                 }
+                if let startupFailure { throw startupFailure }
                 isStarting = false
                 isRecording = true
                 startedAt = Date()
@@ -152,6 +304,7 @@ final class RecordingController: NSObject, NSWindowDelegate {
                 isStarting = false
                 self.recorder = nil
                 closeControls()
+                stopCamera()
                 if generation == token { onError?(error) }
             }
         }
@@ -172,6 +325,7 @@ final class RecordingController: NSObject, NSWindowDelegate {
         regionSelector.cancel()
         optionsWindow?.close()
         optionsWindow = nil
+        stopCamera()
         finish(cancel: true)
     }
     @objc private func stopPressed() { stop() }
@@ -180,6 +334,7 @@ final class RecordingController: NSObject, NSWindowDelegate {
     private func finish(cancel: Bool) {
         guard !isFinishing else { return }
         generation = UUID()
+        stopCamera()
         if isStarting {
             // The startup task owns cleanup until ScreenCaptureKit has finished starting.
             closeControls()
@@ -192,8 +347,8 @@ final class RecordingController: NSObject, NSWindowDelegate {
         removeMonitors()
         elapsedTimer?.invalidate()
         elapsedTimer = nil
-        statusLabel.stringValue = cancel ? "Annulation…" : "Finalisation…"
-        controlsWindow?.contentView?.subviews.compactMap { $0 as? NSStackView }.first?.views.compactMap { $0 as? NSButton }.forEach { $0.isEnabled = false }
+        status = cancel ? "Annulation…" : "Finalisation…"
+        refreshControls()
         Task {
             do {
                 let url = try await recorder.finish(cancel: cancel)
@@ -219,35 +374,21 @@ final class RecordingController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func showControls(on screen: NSScreen) {
-        let panel = NSPanel(contentRect: NSRect(x: screen.visibleFrame.midX - 160, y: screen.visibleFrame.maxY - 92, width: 320, height: 60), styleMask: [.titled, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "ArtShot X · Enregistrement"
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.sharingType = .none
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let stop = NSButton(title: "Arrêter", target: self, action: #selector(stopPressed))
-        stop.bezelStyle = .rounded
-        let cancel = NSButton(title: "Annuler", target: self, action: #selector(cancelPressed))
-        cancel.bezelStyle = .rounded
-        statusLabel.stringValue = "Préparation…"
-        statusLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        let stack = NSStackView(views: [statusLabel, stop, cancel])
-        stack.orientation = .horizontal
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        panel.contentView!.addSubview(stack)
-        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: panel.contentView!.centerXAnchor), stack.centerYAnchor.constraint(equalTo: panel.contentView!.centerYAnchor)])
-        controlsWindow = panel
-        panel.orderFrontRegardless()
+    private func refreshControls() {
+        controls.update(status: status, canStop: isRecording, canCancel: !isFinishing,
+                        cameraEnabled: cameraSource != nil)
     }
 
-    private func closeControls() { elapsedTimer?.invalidate(); elapsedTimer = nil; controlsWindow?.close(); controlsWindow = nil }
+    private func closeControls() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
+        controls.close()
+    }
+
     private func updateElapsed() {
         let seconds = Int(Date().timeIntervalSince(startedAt ?? Date()))
-        statusLabel.stringValue = String(format: "● %02d:%02d", seconds / 60, seconds % 60)
+        status = String(format: "%02d:%02d", seconds / 60, seconds % 60)
+        refreshControls()
     }
 
     private func installMonitors(screen: NSScreen) {
@@ -273,6 +414,10 @@ final class RecordingController: NSObject, NSWindowDelegate {
     static func safeKeyLabel(_ event: NSEvent) -> String? { RecordingShortcutLabel.make(event) }
 
     func windowWillClose(_ notification: Notification) {
-        if notification.object as? NSWindow === optionsWindow { optionsWindow = nil; onStateChanged?() }
+        if notification.object as? NSWindow === optionsWindow {
+            optionsWindow = nil
+            stopCamera()
+            onStateChanged?()
+        }
     }
 }

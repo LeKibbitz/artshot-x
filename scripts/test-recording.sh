@@ -39,5 +39,5 @@ extension ScreenRecorder {
     }
 }
 SWIFT
-swiftc -target "$(uname -m)-apple-macosx14.0" -parse-as-library Sources/ArtShotX/RecordingMedia.swift "$testDirectory/ScreenRecorder.swift" Tests/test-recording.swift -o "$testDirectory/test"
+swiftc -target "$(uname -m)-apple-macosx14.0" -parse-as-library Sources/ArtShotX/RecordingMedia.swift Sources/ArtShotX/CameraLayout.swift Sources/ArtShotX/CameraVideoCompositor.swift "$testDirectory/ScreenRecorder.swift" Tests/test-recording.swift -o "$testDirectory/test"
 "$testDirectory/test"

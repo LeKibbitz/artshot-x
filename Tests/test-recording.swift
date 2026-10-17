@@ -39,6 +39,11 @@ struct RecordingSmokeTest {
                     pixels[p+1] = 15
                     pixels[p+2] = blue ? 15 : 240
                     pixels[p+3] = 255
+                    if blue && (x < 6 || x >= CVPixelBufferGetWidth(buffer) - 6) {
+                        pixels[p] = 15
+                        pixels[p+1] = 240
+                        pixels[p+2] = x < 6 ? 15 : 240
+                    }
                 }
             }
             CVPixelBufferUnlockBaseAddress(buffer, [])
@@ -155,6 +160,41 @@ struct RecordingSmokeTest {
         precondition(RecordingShortcutLabel.make(typed) == nil, "Typed text must never be captured")
         let azerty = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: 0, context: nil, characters: "a", charactersIgnoringModifiers: "a", isARepeat: false, keyCode: 12)!
         precondition(RecordingShortcutLabel.make(azerty) == "⌘A", "Shortcut label must honor keyboard layout")
+        let legacyJSON = try JSONSerialization.data(withJSONObject: ["camera": true, "microphone": false, "systemAudio": false, "cursor": true, "clicks": false, "keys": false])
+        let legacyOptions = try JSONDecoder().decode(RecordingOptions.self, from: legacyJSON)
+        precondition(legacyOptions.cameraLayout == nil, "Existing metadata must decode without a camera layout")
+        for shape in CameraShape.allCases {
+            for fraction in [-1.0, 0.2, 2.0, Double.nan] {
+                let clamped = CameraLayout(shape: shape, widthFraction: fraction, centerX: -2, centerY: 2).frame(in: CGSize(width: 320, height: 240))
+                precondition(CGRect(x: 0, y: 0, width: 320, height: 240).contains(clamped), "Camera layout must stay inside the screen")
+                precondition(clamped.width >= 320 * 0.12 && clamped.width <= 320 * 0.45, "Camera width must be clamped")
+            }
+            for (fraction, centerX, centerY) in [(0.16, 0.75, 0.64), (0.36, 0.25, 0.35)] {
+                let layout = CameraLayout(shape: shape, widthFraction: fraction, centerX: centerX, centerY: centerY)
+                var shapedMetadata = metadata
+                shapedMetadata.options.cameraLayout = layout
+                try JSONEncoder().encode(shapedMetadata).write(to: RecordingMetadata.sidecar(for: raw), options: .atomic)
+                precondition(RecordingMetadata.read(raw)?.options.cameraLayout == layout, "Camera layout must persist")
+                var shapeEdit = edit
+                shapeEdit.camera = true
+                let target = folder.appendingPathComponent("shape-\(shape.rawValue)-\(fraction).mp4")
+                try await RecordingComposition.export(url: raw, edit: shapeEdit, to: target)
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: target))
+                generator.requestedTimeToleranceBefore = .zero
+                generator.requestedTimeToleranceAfter = .zero
+                let (exportedImage, _) = try await generator.image(at: CMTime(seconds: 0.5, preferredTimescale: 600))
+                try checkCameraPixels(NSBitmapImageRep(cgImage: exportedImage), layout: layout)
+                let (previewAsset, previewComposition) = try await RecordingComposition.make(url: raw, edit: shapeEdit)
+                previewComposition.animationTool = nil
+                let previewGenerator = AVAssetImageGenerator(asset: previewAsset)
+                previewGenerator.videoComposition = previewComposition
+                previewGenerator.requestedTimeToleranceBefore = .zero
+                previewGenerator.requestedTimeToleranceAfter = .zero
+                let (previewImage, _) = try await previewGenerator.image(at: CMTime(seconds: 0.5, preferredTimescale: 600))
+                try checkCameraPixels(NSBitmapImageRep(cgImage: previewImage), layout: layout)
+            }
+        }
+        try JSONEncoder().encode(metadata).write(to: RecordingMetadata.sidecar(for: raw), options: .atomic)
         for blockedSidecar in [false, true] {
             let interruptionFolder = folder.appendingPathComponent(blockedSidecar ? "blocked-sidecar" : "interrupted-stream")
             try FileManager.default.createDirectory(at: interruptionFolder, withIntermediateDirectories: true)
@@ -168,7 +208,7 @@ struct RecordingSmokeTest {
             if blockedSidecar { precondition(warning!.contains(interruptedURL.path), "Failed sidecar warning must identify the preserved movie") }
             else { precondition(RecordingMetadata.read(interruptedURL)?.warning != nil, "Stream interruption must be saved as a warning") }
         }
-        print("PASS: separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
+        print("PASS: circle/square/rounded camera masks, aspect fill, fixed layout persistence, matching preview/export pixels, legacy metadata; separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
     }
 
     static func audioBuffer(time: CMTime, frequency: Double) throws -> CMSampleBuffer {
@@ -185,6 +225,43 @@ struct RecordingSmokeTest {
         var buffer: CMSampleBuffer?
         CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!, formatDescription: format!, sampleCount: count, presentationTimeStamp: time, packetDescriptions: nil, sampleBufferOut: &buffer)
         return buffer!
+    }
+
+    static func checkCameraPixels(_ bitmap: NSBitmapImageRep, layout: CameraLayout) throws {
+        let frame = layout.frame(in: CGSize(width: bitmap.pixelsWide, height: bitmap.pixelsHigh))
+        func color(_ point: CGPoint) -> NSColor {
+            bitmap.colorAt(x: Int(point.x), y: Int(point.y))!.usingColorSpace(.deviceRGB)!
+        }
+        let interior = color(CGPoint(x: frame.minX + frame.width * 0.25, y: frame.midY))
+        precondition(interior.blueComponent > 0.6 && interior.redComponent < 0.3, "Camera must occupy the configured normalized position")
+        let corner = color(CGPoint(x: frame.minX + frame.width * 0.03, y: frame.minY + frame.height * 0.03))
+        if layout.shape == .square {
+            precondition(corner.blueComponent > 0.6, "Square corners must contain camera pixels")
+        } else {
+            precondition(corner.redComponent > 0.6 && corner.blueComponent < 0.3 && corner.greenComponent < 0.3, "Masked corners must retain the screen beneath")
+        }
+        let left = color(CGPoint(x: frame.minX + frame.width * 0.04, y: frame.midY))
+        let right = color(CGPoint(x: frame.minX + frame.width * 0.96, y: frame.midY))
+        if layout.shape == .roundedRectangle {
+            precondition(left.greenComponent > 0.6 && left.redComponent < 0.5 && left.blueComponent < 0.3, "Rounded rectangle must preserve the unmirrored left camera edge")
+            precondition(right.greenComponent > 0.6 && right.redComponent > 0.6, "Rounded rectangle must preserve the unmirrored right camera edge")
+        } else {
+            precondition(left.blueComponent > 0.6 && right.blueComponent > 0.6, "Square/circle must aspect-fill by cropping source side markers")
+        }
+        var minX = bitmap.pixelsWide
+        var minY = bitmap.pixelsHigh
+        var maxX = 0
+        var maxY = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                let pixel = color(CGPoint(x: x, y: y))
+                if pixel.greenComponent > 0.4 || pixel.blueComponent > 0.4 {
+                    minX = min(minX, x); minY = min(minY, y)
+                    maxX = max(maxX, x); maxY = max(maxY, y)
+                }
+            }
+        }
+        precondition(abs(Double(minX) - frame.minX) < 3 && abs(Double(minY) - frame.minY) < 3 && abs(Double(maxX + 1) - frame.maxX) < 3 && abs(Double(maxY + 1) - frame.maxY) < 3, "Exported camera bounds must match the selected shape size and position")
     }
 
     static func toneAmplitudes(_ url: URL) async throws -> (system: Double, microphone: Double) {
@@ -248,7 +325,7 @@ struct RecordingSmokeTest {
         for y in 0..<bitmap.pixelsHigh {
             for x in 0..<bitmap.pixelsWide {
                 guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
-                if color.redComponent > 0.6 && color.greenComponent > 0.5 && color.blueComponent < 0.4 { yellow += 1 }
+                if x >= 100 && x <= 200 && y >= 70 && y <= 170 && color.redComponent > 0.6 && color.greenComponent > 0.5 && color.blueComponent < 0.4 { yellow += 1 }
                 if color.redComponent > 0.8 && color.greenComponent > 0.8 && color.blueComponent > 0.8 { white += 1 }
             }
         }

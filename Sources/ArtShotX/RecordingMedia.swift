@@ -10,6 +10,7 @@ struct RecordingOptions: Codable {
     var cursor = true
     var clicks = false
     var keys = false
+    var cameraLayout: CameraLayout? = nil
 }
 
 struct RecordingEvent: Codable {
@@ -68,11 +69,9 @@ enum RecordingComposition {
         let screenTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
         try screenTrack.insertTimeRange(range, of: screen, at: .zero)
         let size = try await screen.load(.naturalSize)
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: range.duration)
-        let screenLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: screenTrack)
-        var layers = [screenLayer]
         let metadata = RecordingMetadata.read(url)
+        var cameraTrackID: CMPersistentTrackID?
+        var cameraRange: CMTimeRange?
         if edit.camera, metadata?.hasCamera == true, videos.count > 1 {
             let source = videos[1]
             let sourceRange = try await source.load(.timeRange)
@@ -81,18 +80,11 @@ enum RecordingComposition {
                 let cameraTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
                 let offset = overlap.start - range.start
                 try cameraTrack.insertTimeRange(overlap, of: source, at: offset)
-                let cameraSize = try await source.load(.naturalSize)
-                let cameraLayer = AVMutableVideoCompositionLayerInstruction(assetTrack: cameraTrack)
-                let width = min(size.width * 0.23, 400)
-                let scale = width / cameraSize.width
-                let transform = CGAffineTransform(scaleX: scale, y: scale).concatenating(CGAffineTransform(translationX: size.width - width - 28, y: size.height - cameraSize.height * scale - 28))
-                cameraLayer.setTransform(transform, at: .zero)
-                if offset > .zero { cameraLayer.setOpacity(0, at: .zero); cameraLayer.setOpacity(1, at: offset) }
-                cameraLayer.setOpacity(0, at: offset + overlap.duration)
-                layers.insert(cameraLayer, at: 0)
+                cameraTrackID = cameraTrack.trackID
+                cameraRange = CMTimeRange(start: offset, duration: overlap.duration)
             }
         }
-        instruction.layerInstructions = layers
+        let instruction = CameraCompositionInstruction(timeRange: CMTimeRange(start: .zero, duration: range.duration), screenTrackID: screenTrack.trackID, cameraTrackID: cameraTrackID, cameraTimeRange: cameraRange, renderSize: size, layout: metadata?.options.cameraLayout)
         var index = 0
         if metadata?.hasSystemAudio == true {
             if edit.systemAudio, index < audios.count {
@@ -108,6 +100,7 @@ enum RecordingComposition {
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = size
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.customVideoCompositorClass = CameraVideoCompositor.self
         videoComposition.instructions = [instruction]
         if let metadata, (edit.clicks || edit.keys), !metadata.events.isEmpty {
             let parent = CALayer()

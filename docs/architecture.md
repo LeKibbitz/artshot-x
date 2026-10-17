@@ -1,4 +1,4 @@
-# ArtShot X 0.2.0 architecture
+# ArtShot X 0.3.0 architecture · build 3
 
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
@@ -12,7 +12,10 @@ ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creat
 | `QuickAccessController` | Bottom-left thumbnail with delete/edit/save/copy actions; image copying only. |
 | `CaptureLibrary` | Atomic local index and persistent screenshot/recording originals. |
 | `AnnotationCanvas` / `PreviewWindowController` | Arrow, rectangle and numbered-step annotations, undo, PNG export and clipboard copying. |
-| `RecordingController` / `ScreenRecorder` | Recording options, permissions, device capture, screen capture and independent media tracks. |
+| `RecordingController` / `ScreenRecorder` | Recording options, permissions, fixed camera setup, screen capture and independent media tracks. |
+| `LiveCameraSource` | One camera session feeds both the live preview and the original camera video track. |
+| `CameraOverlayController` / `RecordingControlBar` | Nonactivating live camera preview and compact horizontal recording controls. |
+| `CameraLayout` / `CameraVideoCompositor` | Normalized camera placement, circle/square/rounded masks and a shared playback/export renderer. |
 | `RecordingComposition` / `VideoPreviewWindowController` | Source/effect toggles, trimming, preview and MP4 export. |
 
 ## Images and scrolling
@@ -27,11 +30,17 @@ Image previews retain an immutable source and an in-memory annotation list. Numb
 
 ## Recordings and edits
 
-ScreenCaptureKit supplies screen frames and optional system audio. AVFoundation supplies optional camera and microphone inputs. A serial recording queue owns frame rendering and media writing. The original MOV keeps screen and camera video tracks separate, as well as system and microphone audio tracks. A JSON sidecar stores recording options and timestamped click/shortcut events.
+ScreenCaptureKit supplies screen frames and optional system audio. AVFoundation supplies optional camera and microphone inputs. A serial recording queue owns frame rendering and media writing. `LiveCameraSource` owns one camera session on a hardware queue, forwards its pixel buffers to the recorder and coalesces preview images to the main actor. Camera authorization occurs only when its option is enabled; starting a camera recording waits for a usable preview frame. The original MOV keeps screen and camera video tracks separate, as well as system and microphone audio tracks. A JSON sidecar stores recording options and timestamped click/shortcut events.
+
+The live camera can be configured before recording as a circle, square or rounded rectangle. Its width is 12–45% of the selected display/region width, constrained to fit; drag placement is clamped inside that area. The normalized center and shape frame use a top-left origin, converted to global AppKit coordinates for the overlay. The preview uses aspect fill without mirroring.
+
+The camera layout is frozen at recording start and saved in the recording metadata. A single shape, size and position applies to the whole video; there are no per-frame transforms or layout keyframes. UserDefaults remembers the last setup for future recordings. The camera window and control bar are excluded from screen capture along with other ArtShot X windows; the independent camera track is composed later. The locked camera overlay lets mouse events pass through to the underlying app.
+
+During recording, Command–Option–Shift–7 reveals a compact horizontal bar rather than the capture panel. The bar provides elapsed time, Stop, Cancel and a camera reveal action. It can be moved independently without changing the fixed camera layout.
 
 Click positions are normalized within the selected capture area. Shortcut labels include special keys and Command shortcuts, using the current keyboard layout; ordinary typed characters are not stored as keyboard events. Enabling these overlays requests Accessibility access. A selected cursor is rendered by ScreenCaptureKit into the screen video and cannot be removed in the editor.
 
-The video editor builds an AVFoundation composition for source toggles and start/end trimming. Native drawing supplies click/shortcut effects during preview; Core Animation supplies those effects during MP4 export. Edits do not rewrite the original tracks. Export writes a temporary file alongside the destination and replaces the destination only after completion; exporting over the original is rejected.
+The video editor builds an AVFoundation composition for source toggles and start/end trimming. A custom Core Image video compositor applies the stored camera layout and mask during both playback and export, preserving the same placement and clipping. Recordings from older versions without layout metadata retain their legacy rectangular placement. Native drawing supplies click/shortcut effects during preview; Core Animation supplies those effects during MP4 export. Edits do not rewrite the original tracks. Export writes a temporary file alongside the destination and replaces the destination only after completion; exporting over the original is rejected.
 
 ## Local storage and boundaries
 
@@ -39,4 +48,4 @@ The video editor builds an AVFoundation composition for source toggles and start
 
 No server, database, login or network upload is involved. There is no durable annotation/edit project format yet. The app uses public macOS APIs and requires macOS 14 or newer.
 
-Synthetic tests cover geometry, annotations, stitching, media composition and export. Hardware permissions, live audiovisual synchronization, external display layouts and device failures require separate manual acceptance.
+Synthetic tests cover geometry, annotations, stitching, persistence, camera masks and placement, overlay controls, media composition and export. Earlier 0.2.0 hardware acceptance is recorded in the testing document. The new 0.3.0 live camera lifecycle and recording bar, hardware permissions, audiovisual synchronization, external display layouts and device failures require separate manual acceptance.

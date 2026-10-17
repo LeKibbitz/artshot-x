@@ -234,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showPanel(_ sender: Any?) {
         guard !busy else { return }
+        if recording.revealActiveControls() { return }
         rememberExternalApp()
         refreshPanel()
         panel.showWindow(nil)

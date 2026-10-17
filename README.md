@@ -2,7 +2,7 @@
 
 A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
-## Version 0.3.0 · build 3
+## Version 0.3.0 · build 4
 
 - Capture the display under your pointer or select a region.
 - Get a floating thumbnail at the bottom left, with **Delete**, **Edit**, **Save** and **Copy** actions. Copy is available for images.
@@ -54,7 +54,7 @@ Recent originals are stored under `~/Library/Application Support/ArtShot X/`. Im
 
 The build script creates an app signed locally with an ad-hoc signature by default. It is not a notarized distribution build. Ad-hoc rebuilds can invalidate macOS capture permissions even while the Settings switch remains enabled. To reuse an existing stable development signing identity, set `ARTSHOT_SIGNING_IDENTITY` when running the build script; the script does not create or install certificates.
 
-Automated checks cover geometry, image editing, stitching, persistence, camera shapes/placement, overlay controls and video export. Earlier version 0.2.0 acceptance verified a native-resolution screenshot and a recording with camera, system audio and microphone, followed by MP4 export. The new 0.3.0 live camera setup and compact recording bar still require hardware acceptance. Multi-display behavior, audiovisual synchronization and live scrolling also need broader acceptance.
+Automated checks cover geometry, image editing, stitching, persistence, camera shapes/placement, overlay controls and video export. Earlier version 0.2.0 acceptance verified a native-resolution screenshot and a recording with camera, system audio and microphone, followed by MP4 export. The user confirmed the new 0.3.0 live camera thumbnail and its controls on their Mac. A new 18.53-second screen/camera capture also verified the recording toolbar Stop action and the transition from preview to recording. Multi-display behavior, audiovisual synchronization and live scrolling also need broader acceptance.
 
 Processing stays on your Mac. There are no accounts, uploads, analytics or remote services. Private reference media and research notes are excluded from this repository.
 

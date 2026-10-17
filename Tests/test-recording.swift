@@ -10,18 +10,19 @@ struct RecordingSmokeTest {
         let raw = folder.appendingPathComponent("capture.mov")
         let writer = try AVAssetWriter(outputURL: raw, fileType: .mov)
         func video(_ width: Int, _ height: Int) -> (AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor) {
-            let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height])
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: width, AVVideoHeightKey: height, AVVideoCompressionPropertiesKey: [AVVideoMaxKeyFrameIntervalKey: 1, AVVideoAllowFrameReorderingKey: false]])
             input.expectsMediaDataInRealTime = true
             writer.add(input)
             return (input, AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height]))
         }
-        let (screenInput, screen) = video(320, 240)
-        let (cameraInput, camera) = video(64, 48)
         let system = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
         let mic = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
         system.expectsMediaDataInRealTime = true
         mic.expectsMediaDataInRealTime = true
+        // Put audio first so the movie duration can exceed both video tracks.
         writer.add(system)
+        let (screenInput, screen) = video(320, 240)
+        let (cameraInput, camera) = video(64, 48)
         writer.add(mic)
         guard writer.startWriting() else { throw writer.error! }
         writer.startSession(atSourceTime: .zero)
@@ -59,7 +60,7 @@ struct RecordingSmokeTest {
                 try await Task.sleep(nanoseconds: 1_000_000)
             }
             let time = CMTime(value: Int64(index), timescale: 30)
-            guard screen.append(red, withPresentationTime: time) else { throw writer.error! }
+            if index >= 3 && index < 57 { guard screen.append(red, withPresentationTime: time) else { throw writer.error! } }
             if index >= 6 && index < 54 { guard camera.append(blue, withPresentationTime: time) else { throw writer.error! } }
             let systemTone = try audioBuffer(time: time, frequency: 440)
             let microphoneTone = try audioBuffer(time: time, frequency: 880)
@@ -119,6 +120,30 @@ struct RecordingSmokeTest {
             let disabled = enableSystem ? tones.microphone : tones.system
             precondition(enabled > 0.15 && disabled < 0.015, "Source toggles must retain only the selected tone")
         }
+        var fullEdit = RecordingEdit()
+        fullEdit.camera = false
+        fullEdit.clicks = false
+        fullEdit.keys = false
+        let padded = folder.appendingPathComponent("screen-range-padding.mp4")
+        try await RecordingComposition.export(url: raw, edit: fullEdit, to: padded)
+        let paddedAsset = AVURLAsset(url: padded)
+        let paddedDuration = try await paddedAsset.load(.duration).seconds
+        precondition(abs(paddedDuration - 2) < 0.04, "Screen padding must preserve the audio timeline duration")
+        let paddedGenerator = AVAssetImageGenerator(asset: paddedAsset)
+        paddedGenerator.requestedTimeToleranceBefore = .zero
+        paddedGenerator.requestedTimeToleranceAfter = .zero
+        for (time, isGap) in [(0.01, true), (0.5, false)] {
+            let (image, _) = try await paddedGenerator.image(at: CMTime(seconds: time, preferredTimescale: 600))
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            let color = bitmap.colorAt(x: 160, y: 120)!.usingColorSpace(.deviceRGB)!
+            if isGap { precondition(color.redComponent < 0.1 && color.greenComponent < 0.1 && color.blueComponent < 0.1, "Known screen gaps must use deterministic black padding") }
+            else { precondition(color.redComponent > 0.6 && color.blueComponent < 0.3, "Valid screen frames must remain visible") }
+        }
+        let paddedVideos = try await paddedAsset.loadTracks(withMediaType: .video)
+        let paddedVideoRange = try await paddedVideos[0].load(.timeRange)
+        precondition(CMTimeRangeGetEnd(paddedVideoRange).seconds >= 1.86, "An audio tail must not truncate valid screen footage")
+        let paddedTones = try await toneAmplitudes(padded)
+        precondition(paddedTones.system > 0.06 && paddedTones.microphone > 0.06, "Audio must survive delayed screen start and earlier screen end")
         // Existing save targets must be replaced only after a complete export.
         try await RecordingComposition.export(url: raw, edit: edit, to: withoutCamera)
         let earlyCameraBlue = try await bluePixelCount(withCamera, at: 0.01)
@@ -154,7 +179,7 @@ struct RecordingSmokeTest {
         let tail = folder.appendingPathComponent("camera-tail.mp4")
         try await RecordingComposition.export(url: raw, edit: tailEdit, to: tail)
         let tailBeginningBlue = try await bluePixelCount(tail, at: 0.01)
-        let tailEndBlue = try await bluePixelCount(tail, at: 0.20)
+        let tailEndBlue = try await bluePixelCount(tail, at: 0.15)
         precondition(tailBeginningBlue > 500 && tailEndBlue < 100, "Early camera end must become transparent")
         let typed = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "password", charactersIgnoringModifiers: "password", isARepeat: false, keyCode: 0)!
         precondition(RecordingShortcutLabel.make(typed) == nil, "Typed text must never be captured")
@@ -208,7 +233,7 @@ struct RecordingSmokeTest {
             if blockedSidecar { precondition(warning!.contains(interruptedURL.path), "Failed sidecar warning must identify the preserved movie") }
             else { precondition(RecordingMetadata.read(interruptedURL)?.warning != nil, "Stream interruption must be saved as a warning") }
         }
-        print("PASS: circle/square/rounded camera masks, aspect fill, fixed layout persistence, matching preview/export pixels, legacy metadata; separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
+        print("PASS: delayed screen start/earlier screen end with audio preserved; circle/square/rounded camera masks, aspect fill, fixed layout persistence, matching preview/export pixels, legacy metadata; separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
     }
 
     static func audioBuffer(time: CMTime, frequency: Double) throws -> CMSampleBuffer {

@@ -84,7 +84,18 @@ enum RecordingComposition {
                 cameraRange = CMTimeRange(start: offset, duration: overlap.duration)
             }
         }
-        let instruction = CameraCompositionInstruction(timeRange: CMTimeRange(start: .zero, duration: range.duration), screenTrackID: screenTrack.trackID, cameraTrackID: cameraTrackID, cameraTimeRange: cameraRange, renderSize: size, layout: metadata?.options.cameraLayout)
+        // Track timeRange can include empty edits before its first frame. Only nonempty
+        // segment mappings describe where the compositor can expect actual screen images.
+        let segments = try await screen.load(.segments)
+        let sourceScreenRanges: [CMTimeRange]
+        if segments.isEmpty { sourceScreenRanges = [try await screen.load(.timeRange)] }
+        else { sourceScreenRanges = segments.filter { !$0.isEmpty }.map { $0.timeMapping.target } }
+        let screenTimeRanges = sourceScreenRanges.compactMap { sourceRange -> CMTimeRange? in
+            let overlap = CMTimeRangeGetIntersection(range, otherRange: sourceRange)
+            guard overlap.duration > .zero else { return nil }
+            return CMTimeRange(start: overlap.start - range.start, duration: overlap.duration)
+        }
+        let instruction = CameraCompositionInstruction(timeRange: CMTimeRange(start: .zero, duration: range.duration), screenTrackID: screenTrack.trackID, cameraTrackID: cameraTrackID, cameraTimeRange: cameraRange, screenTimeRanges: screenTimeRanges, renderSize: size, layout: metadata?.options.cameraLayout)
         var index = 0
         if metadata?.hasSystemAudio == true {
             if edit.systemAudio, index < audios.count {

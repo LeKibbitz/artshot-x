@@ -1,4 +1,4 @@
-# ArtShot X 0.3.0 architecture · build 3
+# ArtShot X 0.3.0 architecture · build 4
 
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
@@ -48,4 +48,4 @@ The video editor builds an AVFoundation composition for source toggles and start
 
 No server, database, login or network upload is involved. There is no durable annotation/edit project format yet. The app uses public macOS APIs and requires macOS 14 or newer.
 
-Synthetic tests cover geometry, annotations, stitching, persistence, camera masks and placement, overlay controls, media composition and export. Earlier 0.2.0 hardware acceptance is recorded in the testing document. The new 0.3.0 live camera lifecycle and recording bar, hardware permissions, audiovisual synchronization, external display layouts and device failures require separate manual acceptance.
+Synthetic tests cover geometry, annotations, stitching, persistence, camera masks and placement, overlay controls, media composition and export. Earlier 0.2.0 hardware acceptance is recorded in the testing document. Version 0.3.0 live camera setup and a recording stopped through the toolbar were exercised on the built-in display. Audiovisual synchronization, external display layouts and device failures require broader manual acceptance.

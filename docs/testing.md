@@ -1,4 +1,4 @@
-# Testing ArtShot X 0.3.0 · build 3
+# Testing ArtShot X 0.3.0 · build 4
 
 ## Automated checks
 
@@ -41,7 +41,7 @@ These checks use synthetic inputs. They do not establish that live screen record
 10. Enable click and shortcut indicators. Test Accessibility refusal/approval, click placement inside a selected region, special keys, AZERTY Command shortcuts and ordinary typing. Toggle effects and sources in the editor; compare preview with the exported MP4, including effects around trim boundaries. Confirm the cursor stays visible when it was captured.
 11. Export over an existing file and attempt to export over the original. Test an invalid trim and an unwritable destination. Failures must preserve existing files. Check that closing an editor during export does not lose a completed recording.
 
-Synthetic tests do not establish live capture or physical media-device acceptance. The new 0.3.0 camera setup, preview-to-recording lifecycle and recording bar remain pending hardware validation; the earlier 0.2.0 acceptance below does not validate these additions. Record hardware results separately with the macOS version, display setup, enabled sources and permission state.
+Synthetic tests do not establish live capture or physical media-device acceptance. The user confirmed that the new 0.3.0 live camera thumbnail and shape/size settings are visible on their Mac. The preview-to-recording transition and recording toolbar Stop action also passed a real camera capture; physical shortcut 7 delivery during recording remains a separate manual check. Record hardware results separately with the macOS version, display setup, enabled sources and permission state.
 
 Copy changes the system clipboard only on request. Save/export uses a native save panel. Captures stay local.
 
@@ -62,3 +62,13 @@ A real 12.43-second MOV contained H.264 screen footage at 1512 × 982, H.264 cam
 The live export exposed a compatibility issue: separate system/microphone MP4 tracks could cause a player to select only one source. Export now uses an explicit audio mix, preserving separate sources only in the original MOV. Regression tests verify that system 440 Hz and microphone 880 Hz tones coexist in one exported AAC stream, and that system-only, microphone-only and silent exports respect the toggles. Re-exporting the real recording yielded a 12.433333-second MP4 with one H.264 video stream and one stereo AAC stream, decoded without errors.
 
 The corrected binary was installed and its capture authorization renewed. A subsequent real PNG capture succeeded. Test recordings and exports remain local and are excluded from Git.
+
+## 0.3.0 camera setup acceptance — 2026-10-17
+
+On macOS 26.6.2 with the built-in Retina display, the installed app received physical camera frames and enabled Start only after a frame arrived. The user confirmed seeing the live thumbnail and its shape/size controls. No screen/camera test media is published.
+
+A new 18.53-second capture with the final camera pipeline produced independent H.264 screen (1512 × 982) and camera (640 × 480) tracks. The stored fixed camera layout retained the selected circle and 21.2% width. The floating recording bar exposed its running timer, Stop, camera and Cancel actions; Stop finalized the MOV and returned the result thumbnail. Inspecting the raw screen track confirmed that ArtShot X camera/control windows were excluded, avoiding a second baked-in camera overlay.
+
+Real media exposed empty screen-track edits before the first frame. The compositor now checks nonempty segment mappings and pads screen gaps without shifting audio, trim or event times. Regression coverage includes delayed screen start and an audio tail longer than the screen. A full 12.433-second real recording exported to H.264 plus one stereo AAC track, decoded without errors; original media and metadata hashes stayed unchanged.
+
+The fresh 18.53-second camera recording also exported successfully to an 18.567-second H.264 MP4 (30 fps rounding), with no audio because microphone/system audio were disabled for that test. Full decode passed. The installed build 4 binary and the final release build have identical SHA-256 hashes; no further permission reset was needed after this capture.

@@ -8,15 +8,17 @@ final class CameraCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let requiredSourceTrackIDs: [NSValue]?
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let screenTrackID: CMPersistentTrackID
+    let screenTimeRanges: [CMTimeRange]
     let cameraTrackID: CMPersistentTrackID?
     let cameraTimeRange: CMTimeRange?
     let cameraFrame: CGRect
     let renderSize: CGSize
     let mask: CIImage?
 
-    init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, cameraTimeRange: CMTimeRange?, renderSize: CGSize, layout: CameraLayout?) {
+    init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, cameraTimeRange: CMTimeRange?, screenTimeRanges: [CMTimeRange], renderSize: CGSize, layout: CameraLayout?) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
+        self.screenTimeRanges = screenTimeRanges
         self.cameraTrackID = cameraTrackID
         self.cameraTimeRange = cameraTimeRange
         self.renderSize = renderSize
@@ -78,13 +80,21 @@ final class CameraVideoCompositor: NSObject, AVVideoCompositing, @unchecked Send
             self.lock.unlock()
             guard !cancelled else { request.finishCancelledRequest(); return }
             guard let instruction = request.videoCompositionInstruction as? CameraCompositionInstruction,
-                  let screen = request.sourceFrame(byTrackID: instruction.screenTrackID),
                   let output = request.renderContext.newPixelBuffer() else {
                 request.finish(with: RecordingFailure.message("Impossible de composer l’image vidéo.")); return
             }
             let bounds = CGRect(origin: .zero, size: instruction.renderSize)
-            var image = CIImage(cvPixelBuffer: screen)
-            image = image.transformed(by: CGAffineTransform(scaleX: bounds.width / image.extent.width, y: bounds.height / image.extent.height)).cropped(to: bounds)
+            var image: CIImage
+            if !instruction.screenTimeRanges.contains(where: { CMTimeRangeContainsTime($0, time: request.compositionTime) }) {
+                // Capture devices can start late or audio can outlast the screen track.
+                // Deterministic padding preserves audio, trim and event timestamps.
+                image = CIImage(color: .black).cropped(to: bounds)
+            } else if let screen = request.sourceFrame(byTrackID: instruction.screenTrackID) {
+                image = CIImage(cvPixelBuffer: screen)
+                image = image.transformed(by: CGAffineTransform(scaleX: bounds.width / image.extent.width, y: bounds.height / image.extent.height)).cropped(to: bounds)
+            } else {
+                request.finish(with: RecordingFailure.message("Une image écran attendue est indisponible.")); return
+            }
             if let id = instruction.cameraTrackID, let range = instruction.cameraTimeRange,
                CMTimeRangeContainsTime(range, time: request.compositionTime), let camera = request.sourceFrame(byTrackID: id) {
                 var overlay = CIImage(cvPixelBuffer: camera)

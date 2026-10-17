@@ -21,7 +21,7 @@ final class QuickAccessController: NSWindowController {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true

@@ -265,7 +265,7 @@ final class ScrollingCaptureController {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
         panel.sharingType = .none
         panel.isMovableByWindowBackground = true
         let instruction = NSTextField(wrappingLabelWithString: "Dans l’app à capturer, défilez lentement vers le bas.")

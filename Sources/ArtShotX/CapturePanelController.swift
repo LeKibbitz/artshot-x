@@ -1,7 +1,16 @@
 import AppKit
 
+private final class CaptureToolbarPanel: NSPanel {
+    var onCancel: (() -> Void)?
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+    override func cancelOperation(_ sender: Any?) { onCancel?() }
+}
+
 @MainActor
 final class CapturePanelController: NSWindowController {
+    var onDismiss: (() -> Void)?
+    var onSnapshot: (() -> Void)?
     var onDisplay: (() -> Void)?
     var onRegion: (() -> Void)?
     var onScroll: (() -> Void)?
@@ -12,93 +21,172 @@ final class CapturePanelController: NSWindowController {
     var onOpenImage: (() -> Void)?
     var onSample: (() -> Void)?
     var onPermission: (() -> Void)?
-    private let statusLabel = NSTextField(wrappingLabelWithString: "")
-    private let permissionButton = NSButton(title: "Autoriser la capture…", target: nil, action: nil)
+
+    private enum Style {
+        static let size = NSSize(width: 644, height: 94)
+        static let foreground = NSColor(calibratedWhite: 0.94, alpha: 1)
+        static let background = NSColor(calibratedWhite: 0.12, alpha: 0.98)
+    }
+    private let selectionLabel = NSTextField(labelWithString: "Choisir une zone ou un écran")
     private var captureButtons: [NSButton] = []
-    private var lastImageButton: NSButton!
-    private var lastVideoButton: NSButton!
-    private var stopButton: NSButton!
+    private var videoButton: NSButton!
+    private var statusButton: NSButton!
+    private var lastImageItem: NSMenuItem!
+    private var lastVideoItem: NSMenuItem!
+    private let moreMenu = NSMenu()
+    private let statusPopover = NSPopover()
+    private let statusLabel = NSTextField(wrappingLabelWithString: "")
+    private var recording = false
 
     init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 490, height: 530),
-                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        super.init(window: window)
-        window.title = "ArtShot X · Capturer"
-        window.isReleasedWhenClosed = false
-        window.center()
-        let heading = NSTextField(labelWithString: "Que voulez-vous capturer ?")
-        heading.font = .systemFont(ofSize: 21, weight: .semibold)
-        let fullscreen = button("Plein écran                         ⌘⌥⇧5", symbol: "rectangle.dashed", action: #selector(captureDisplay))
-        let region = button("Sélection de zone                  ⌘⌥⇧6", symbol: "viewfinder", action: #selector(captureRegion))
-        let scroll = button("Capture défilante", symbol: "arrow.down.to.line", action: #selector(captureScroll))
-        let video = button("Enregistrer l’écran…", symbol: "record.circle", action: #selector(recordVideo))
-        captureButtons = [fullscreen, region, scroll, video]
-        stopButton = button("Arrêter l’enregistrement", symbol: "stop.circle.fill", action: #selector(stopRecording))
-        lastImageButton = button("Dernière capture", symbol: "photo", action: #selector(lastImage))
-        lastVideoButton = button("Dernière vidéo", symbol: "film", action: #selector(lastVideo))
-        let recent = NSStackView(views: [lastImageButton, lastVideoButton])
-        recent.distribution = .fillEqually
-        recent.spacing = 10
-        let open = button("Ouvrir une image…", symbol: "folder", action: #selector(openImage))
-        let sample = button("Image d’essai", symbol: "sparkles", action: #selector(showSample))
-        let images = NSStackView(views: [open, sample])
-        images.distribution = .fillEqually
-        images.spacing = 10
-        statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.textColor = .secondaryLabelColor
-        permissionButton.bezelStyle = .rounded
-        permissionButton.target = self
-        permissionButton.action = #selector(requestPermission)
-        let stack = NSStackView(views: [heading, fullscreen, region, scroll, video, stopButton, recent, images, statusLabel, permissionButton])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        guard let content = window.contentView else { return }
-        content.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
-            statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            recent.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            images.widthAnchor.constraint(equalTo: stack.widthAnchor)
-        ])
-        for button in captureButtons + [stopButton].compactMap({ $0 }) {
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 38).isActive = true
+        let panel = CaptureToolbarPanel(contentRect: NSRect(origin: .zero, size: Style.size),
+                                       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        super.init(window: panel)
+        panel.title = "ArtShot X · Capture"
+        panel.onCancel = { [weak self] in self?.dismiss() }
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
+        panel.sharingType = .none
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+        panel.appearance = NSAppearance(named: .darkAqua)
+        let content = NSView(frame: NSRect(origin: .zero, size: Style.size))
+        content.wantsLayer = true
+        content.layer?.backgroundColor = Style.background.cgColor
+        content.layer?.cornerRadius = 18
+        panel.contentView = content
+        let grip = NSTextField(labelWithString: "⠿")
+        grip.frame = NSRect(x: 10, y: 47, width: 15, height: 22)
+        grip.textColor = .secondaryLabelColor
+        grip.setAccessibilityLabel("Déplacer la barre")
+        content.addSubview(grip)
+        let definitions: [(String, String, Selector, CGFloat)] = [
+            ("Zone", "viewfinder", #selector(captureRegion), 76),
+            ("Écran", "rectangle.dashed", #selector(captureDisplay), 76),
+            ("Photo", "camera", #selector(captureSnapshot), 76),
+            ("Défilement", "arrow.down.to.line", #selector(captureScroll), 108),
+            ("Vidéo", "record.circle", #selector(recordVideo), 86)
+        ]
+        var x: CGFloat = 30
+        for (title, symbol, action, width) in definitions {
+            let control = button(title, symbol: symbol, action: action)
+            control.frame = NSRect(x: x, y: 36, width: width, height: 44)
+            content.addSubview(control)
+            captureButtons.append(control)
+            x += width + 3
         }
+        videoButton = captureButtons.last!
+        let separator = NSBox(frame: NSRect(x: x + 3, y: 42, width: 1, height: 32))
+        separator.boxType = .separator
+        content.addSubview(separator)
+        let more = button("Plus", symbol: "ellipsis", action: #selector(showMore))
+        more.frame = NSRect(x: x + 12, y: 36, width: 62, height: 44)
+        content.addSubview(more)
+        statusButton = button("", symbol: "info.circle", action: #selector(showStatus))
+        statusButton.frame = NSRect(x: 566, y: 42, width: 28, height: 32)
+        statusButton.setAccessibilityLabel("État et autorisations")
+        content.addSubview(statusButton)
+        let close = button("", symbol: "xmark", action: #selector(dismiss))
+        close.frame = NSRect(x: 606, y: 42, width: 28, height: 32)
+        close.setAccessibilityLabel("Fermer la barre")
+        close.keyEquivalent = "\u{1b}"
+        content.addSubview(close)
+        selectionLabel.frame = NSRect(x: 30, y: 10, width: 580, height: 18)
+        selectionLabel.font = .systemFont(ofSize: 11)
+        selectionLabel.textColor = .secondaryLabelColor
+        content.addSubview(selectionLabel)
+        lastImageItem = menuItem("Dernière capture", action: #selector(lastImage))
+        lastVideoItem = menuItem("Dernière vidéo", action: #selector(lastVideo))
+        moreMenu.addItem(.separator())
+        _ = menuItem("Ouvrir une image…", action: #selector(openImage))
+        _ = menuItem("Image d’essai", action: #selector(showSample))
+        moreMenu.addItem(.separator())
+        _ = menuItem("Autoriser la capture…", action: #selector(requestPermission))
+        moreMenu.autoenablesItems = false
+        let statusController = NSViewController()
+        statusController.view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 210))
+        statusLabel.frame = NSRect(x: 14, y: 48, width: 372, height: 148)
+        statusLabel.font = .systemFont(ofSize: 12)
+        statusController.view.addSubview(statusLabel)
+        let permission = NSButton(title: "Autoriser la capture…", target: self, action: #selector(requestPermission))
+        permission.frame = NSRect(x: 14, y: 10, width: 220, height: 30)
+        statusController.view.addSubview(permission)
+        statusPopover.contentViewController = statusController
+        statusPopover.behavior = .transient
+        refresh(hasPermission: true, busy: false, shortcutFailures: [], hasImage: false, hasVideo: false, isRecording: false)
     }
 
     required init?(coder: NSCoder) { nil }
 
+    func setSelection(isRegion: Bool, pixelSize: CGSize) {
+        for (index, control) in captureButtons.prefix(2).enumerated() {
+            let selected = isRegion ? index == 0 : index == 1
+            control.state = selected ? .on : .off
+            control.contentTintColor = selected ? .systemBlue : Style.foreground
+        }
+        selectionLabel.stringValue = "\(isRegion ? "Zone" : "Écran") · \(Int(pixelSize.width)) × \(Int(pixelSize.height)) px"
+    }
+
+    func present(on screen: NSScreen) {
+        guard let window else { return }
+        let visible = screen.visibleFrame
+        window.setFrameOrigin(NSPoint(x: max(visible.minX, visible.midX - window.frame.width / 2),
+                                      y: visible.minY + 34))
+        window.orderFrontRegardless()
+        // Keyboard control belongs to this temporary panel; the browser stays active.
+        window.makeKey()
+    }
+
     func refresh(hasPermission: Bool, busy: Bool, shortcutFailures: [String], hasImage: Bool, hasVideo: Bool, isRecording: Bool) {
-        var text = hasPermission ? "L’app reste en arrière-plan. ⌘⌥⇧7 ouvre ce menu."
-            : "Autorisez la capture dans macOS. L’éditeur fonctionne aussi avec une image existante."
-        if !shortcutFailures.isEmpty { text += "\nRaccourci indisponible : " + shortcutFailures.joined(separator: ", ") + ". Fermez l’app qui l’utilise, puis relancez ArtShot X." }
-        statusLabel.stringValue = text
-        permissionButton.isHidden = hasPermission
+        recording = isRecording
         captureButtons.forEach { $0.isEnabled = !busy && !isRecording }
-        lastImageButton.isEnabled = hasImage && !busy
-        lastVideoButton.isEnabled = hasVideo && !busy
-        stopButton.isHidden = !isRecording
+        videoButton.isEnabled = isRecording || !busy
+        videoButton.title = isRecording ? "Arrêter" : "Vidéo"
+        videoButton.image = NSImage(systemSymbolName: isRecording ? "stop.circle.fill" : "record.circle", accessibilityDescription: nil)
+        videoButton.setAccessibilityLabel(isRecording ? "Arrêter l’enregistrement" : "Vidéo")
+        lastImageItem.isEnabled = hasImage && !busy
+        lastVideoItem.isEnabled = hasVideo && !busy
+        var messages = [String]()
+        if !hasPermission { messages.append("Autorisez la capture dans les réglages macOS.") }
+        if !shortcutFailures.isEmpty { messages.append("Raccourci indisponible : " + shortcutFailures.joined(separator: ", ") + ". Fermez l’app qui l’utilise, puis relancez ArtShot X.") }
+        if isRecording { messages.append("Enregistrement en cours.") }
+        else if busy { messages.append("Capture en cours…") }
+        if messages.isEmpty { messages.append("⌘⌥⇧7 ouvre cette barre.") }
+        statusLabel.stringValue = messages.joined(separator: "\n")
+        statusButton.toolTip = statusLabel.stringValue
+        statusButton.image = NSImage(systemSymbolName: !hasPermission || !shortcutFailures.isEmpty ? "exclamationmark.circle.fill" : "info.circle", accessibilityDescription: nil)
+        statusButton.contentTintColor = !hasPermission || !shortcutFailures.isEmpty ? .systemOrange : Style.foreground
     }
 
     private func button(_ title: String, symbol: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage(), target: self, action: action)
-        button.bezelStyle = .rounded
-        button.imagePosition = .imageLeading
-        button.setAccessibilityLabel(title.trimmingCharacters(in: .whitespaces))
-        return button
+        let control = NSButton(title: title, image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage(), target: self, action: action)
+        control.isBordered = false
+        control.font = .systemFont(ofSize: 12, weight: .medium)
+        control.contentTintColor = Style.foreground
+        control.imagePosition = title.isEmpty ? .imageOnly : .imageAbove
+        control.setAccessibilityLabel(title)
+        return control
     }
-
+    private func menuItem(_ title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        moreMenu.addItem(item)
+        return item
+    }
+    @objc private func showMore(_ sender: NSButton) { moreMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height), in: sender) }
+    @objc private func showStatus(_ sender: NSButton) { statusPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY) }
+    func hide() { statusPopover.close(); window?.orderOut(nil) }
+    @objc private func dismiss() { hide(); onDismiss?() }
+    @objc private func captureSnapshot() { onSnapshot?() }
     @objc private func captureDisplay() { onDisplay?() }
     @objc private func captureRegion() { onRegion?() }
     @objc private func captureScroll() { onScroll?() }
-    @objc private func recordVideo() { onRecord?() }
-    @objc private func stopRecording() { onStopRecording?() }
+    @objc private func recordVideo() { if recording { onStopRecording?() } else { onRecord?() } }
     @objc private func lastImage() { onLastImage?() }
     @objc private func lastVideo() { onLastVideo?() }
     @objc private func openImage() { onOpenImage?() }

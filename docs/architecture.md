@@ -1,4 +1,4 @@
-# ArtShot X 0.5.0 architecture · build 6
+# ArtShot X 0.6.0 architecture · build 7
 
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
@@ -7,6 +7,7 @@ ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creat
 | `AppDelegate` | Menu bar, capture coordination, transient windows, recent items and quit handling. |
 | `GlobalShortcuts` | Carbon hotkeys for Command–Option–Shift–5/6/7 without observing ordinary typing. |
 | `CaptureService` | ScreenCaptureKit screenshots; display targeting, exclusion of ArtShot X and Retina pixel preservation. |
+| `CapturePanelController` / `CaptureTargetOutline` | Compact nonactivating target/action toolbar and mouse-transparent prepared-region outline. |
 | `SelectionOverlayController` | Single-display region selection with Return/Escape confirmation. |
 | `ScrollingCaptureController` / `ScrollStitcher` | Settled-frame capture, conservative vertical registration and image assembly. |
 | `QuickAccessController` | Bottom-left thumbnail with delete/edit/save/copy actions; image copying only. |
@@ -18,6 +19,12 @@ ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creat
 | `CameraOverlayController` / `RecordingControlBar` | Nonactivating live camera preview and compact horizontal recording controls. |
 | `CameraLayout` / `CameraVideoCompositor` | Normalized camera placement, circle/square/rounded/vertical-oval masks and centered digital zoom and a shared playback/export renderer. |
 | `RecordingComposition` / `VideoPreviewWindowController` | Source/effect toggles, trimming, passage removal, per-source gain, preview and MP4 export. |
+
+## Capture context and focus
+
+Shortcut 7 presents a nonactivating `NSPanel` on the pointer's display. Zone/Display changes the prepared target; Photo/Scroll/Video consumes that target. Zone selection returns to the bar with dimensions and a mouse-transparent outline instead of taking a screenshot. Recording options accept the prepared region without a second selection. Shortcuts 5/6 retain their immediate display/region capture behavior.
+
+The toolbar, selection, video options and scroll HUD never activate ArtShot X. Selection temporarily acquires keyboard focus through a nonactivating panel for Return/Escape, then closes before the next action. Transient panels join all Spaces and applications, with fullscreen-auxiliary behavior. The capture flow no longer hides or reorders editors, nor tries to activate a remembered external application; ScreenCaptureKit already excludes ArtShot X windows. Explicit editor/open-file commands retain normal app activation.
 
 ## Images and scrolling
 

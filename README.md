@@ -2,9 +2,10 @@
 
 A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
-## Version 0.5.0 · build 6
+## Version 0.6.0 · build 7
 
-- Capture the display under your pointer or select a region.
+- Open a compact floating capture bar over the current app. Select **Zone** or **Écran**, then choose **Photo**, **Défilement** or **Vidéo**, reusing the same target.
+- Capture the display under your pointer or select a region directly with shortcuts 5 and 6.
 - Get a floating thumbnail at the bottom left, with **Delete**, **Edit**, **Save** and **Copy** actions. Copy is available for images.
 - Annotate images with arrows, rectangles and numbered steps; undo annotations, copy the result or save a PNG.
 - Reopen recent screenshots and recordings across app launches. Originals stay on your Mac.
@@ -26,6 +27,7 @@ bash scripts/test-preview.sh
 bash scripts/test-recording.sh
 bash scripts/test-library.sh
 bash scripts/test-capture-ui.sh
+bash scripts/test-capture-focus.sh
 bash scripts/test-recording-overlays.sh
 bash scripts/test-recording-controls.sh
 bash scripts/test-recording-edit.sh
@@ -34,17 +36,19 @@ bash scripts/build.sh
 open "dist/ArtShot X.app"
 ```
 
-Open the menu bar icon or use the capture panel shortcut. Grant screen recording access in macOS Privacy & Security when prompted, then relaunch if macOS requests it. Camera and microphone permissions are requested only when selected. Click and shortcut overlays require Accessibility access. Existing images and the sample editor work without screen capture permission.
+Open the menu bar icon or use Command–Option–Shift–7. The capture bar stays over the current application and Space, including fullscreen, without activating ArtShot X or raising its editors. Grant screen recording access in macOS Privacy & Security when prompted, then relaunch if macOS requests it. Camera and microphone permissions are requested only when selected. Click and shortcut overlays require Accessibility access. Existing images and the sample editor work without screen capture permission.
 
 | Shortcut | Action |
 | --- | --- |
 | Command + Option + Shift + 5 | Capture a display |
 | Command + Option + Shift + 6 | Select a region |
-| Command + Option + Shift + 7 | Open the capture panel, or reveal the active recording bar |
+| Command + Option + Shift + 7 | Open the floating capture bar, or reveal the active recording bar |
 
 The shortcuts use physical number-row keys on AZERTY and QWERTY. If a shortcut conflicts, menu bar and panel commands remain available. ArtShot X does not change macOS shortcuts or disable other apps.
 
-For a region, drag to select, press Return to confirm or Escape to cancel. Selection stays on one display. For a scrolling capture, select the document content, scroll downward in small increments and pause after each increment. Click **Terminer** to assemble the image or **Annuler** to cancel. Uncertain alignment, upward scrolling and fixed footers are rejected. Limits are 20,000 pixels of height, 32 million pixels and 200 captured positions.
+With shortcut 7, choose **Zone**, drag a rectangle and press Return to validate it. The bar returns with its pixel dimensions and an outline. Choose **Photo** for a screenshot, **Défilement** to scroll that same area, or **Vidéo** to open recording options with the area already selected. **Écran** resets the target to the whole display. The **Plus** menu contains recent media and image-opening commands; the information button shows permissions and shortcut issues. Close or Escape dismisses preparation.
+
+With shortcut 6, drag to select, press Return to capture directly or Escape to cancel. Selection stays on one display. For a scrolling capture, select the document content, scroll downward in small increments and pause after each increment. Click **Terminer** to assemble the image or **Annuler** to cancel. Uncertain alignment, upward scrolling and fixed footers are rejected. Limits are 20,000 pixels of height, 32 million pixels and 200 captured positions.
 
 Enable the camera in the recording options to see its live preview. Choose its shape, size and zoom, then drag it within the selected display or region. The vertical oval has a 3:4 frame; digital zoom crops the camera image centrally without resizing or moving that frame. The setting is saved as a single layout for the recording; there is no animated camera movement or timeline of layout changes. Its last setup is remembered for the next recording. Camera controls are locked once recording starts.
 

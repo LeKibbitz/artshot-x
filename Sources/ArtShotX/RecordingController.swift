@@ -101,21 +101,25 @@ final class RecordingController: NSObject, NSWindowDelegate {
             return true
         }
         if let optionsWindow {
-            optionsWindow.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            optionsWindow.orderFrontRegardless()
+            optionsWindow.makeKey()
             return true
         }
         return isSelecting
     }
 
-    func present(on screen: NSScreen) {
+    func present(on screen: NSScreen, region: CGRect? = nil) {
         if revealActiveControls() { return }
         self.screen = screen
-        sourceRegion = nil
-        regionButton.state = .off
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Style.optionsSize), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        sourceRegion = region
+        regionButton.state = region == nil ? .off : .on
+        let window = RecordingOptionsPanel(contentRect: NSRect(origin: .zero, size: Style.optionsSize), styleMask: [.titled, .closable, .nonactivatingPanel], backing: .buffered, defer: false)
         window.title = "Enregistrer une vidéo"
         window.isReleasedWhenClosed = false
+        window.isFloatingPanel = true
+        window.hidesOnDeactivate = false
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
         window.sharingType = .none
         window.delegate = self
         let headline = NSTextField(labelWithString: "Écran : \(screen.localizedName)")
@@ -157,9 +161,11 @@ final class RecordingController: NSObject, NSWindowDelegate {
         ])
         optionsWindow = window
         onStateChanged?()
-        window.center()
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        let visible = screen.visibleFrame
+        window.setFrameOrigin(CGPoint(x: visible.midX - window.frame.width / 2,
+                                      y: max(visible.minY, visible.midY - window.frame.height / 2)))
+        window.orderFrontRegardless()
+        window.makeKey()
         cameraToggled()
     }
 
@@ -243,12 +249,13 @@ final class RecordingController: NSObject, NSWindowDelegate {
         isSelecting = true
         optionsWindow?.orderOut(nil)
         cameraOverlay.close()
-        regionSelector.begin(on: screen) { [weak self] rect in
+        regionSelector.begin(on: screen, confirmation: "valider la zone") { [weak self] rect in
             guard let self else { return }
             self.isSelecting = false
             self.sourceRegion = rect
             if rect == nil { self.regionButton.state = .off }
-            self.optionsWindow?.makeKeyAndOrderFront(nil)
+            self.optionsWindow?.orderFrontRegardless()
+            self.optionsWindow?.makeKey()
             self.showCamera(editable: true)
         }
     }
@@ -517,4 +524,10 @@ final class RecordingController: NSObject, NSWindowDelegate {
             onStateChanged?()
         }
     }
+}
+
+@MainActor
+private final class RecordingOptionsPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }

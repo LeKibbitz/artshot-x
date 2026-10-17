@@ -93,7 +93,39 @@ import AppKit
 
         let panel = CapturePanelController()
         panel.refresh(hasPermission: true, busy: false, shortcutFailures: [], hasImage: true, hasVideo: true, isRecording: false)
-        verifyLayout(panel.window!, label: "Capture menu")
+        let panelWindow = panel.window!
+        let foregroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let normal = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled], backing: .buffered, defer: false)
+        panel.present(on: screen)
+        precondition(panelWindow.isVisible && !normal.isVisible)
+        precondition(panelWindow.styleMask.contains(.nonactivatingPanel) && panelWindow.styleMask.contains(.borderless))
+        precondition(panelWindow is NSPanel && panelWindow.canBecomeKey && !panelWindow.canBecomeMain)
+        precondition(panelWindow.sharingType == .none && !panelWindow.hidesOnDeactivate)
+        precondition(panelWindow.collectionBehavior.contains(.canJoinAllSpaces) && panelWindow.collectionBehavior.contains(.fullScreenAuxiliary))
+        precondition(panelWindow.isKeyWindow && NSWorkspace.shared.frontmostApplication?.processIdentifier == foregroundPID)
+        precondition(screen.visibleFrame.contains(panelWindow.frame))
+        verifyLayout(panelWindow, label: "Capture menu")
+        var captureActions: [String] = []
+        panel.onSnapshot = { captureActions.append("snapshot") }
+        panel.onRegion = { captureActions.append("region") }
+        panel.onDisplay = { captureActions.append("display") }
+        panel.onScroll = { captureActions.append("scroll") }
+        panel.onRecord = { captureActions.append("record") }
+        for title in ["Zone", "Écran", "Photo", "Défilement", "Vidéo"] { button(title, in: panelWindow.contentView!).performClick(nil) }
+        precondition(captureActions == ["region", "display", "snapshot", "scroll", "record"])
+        precondition(NSWorkspace.shared.frontmostApplication?.processIdentifier == foregroundPID && !normal.isVisible)
+        panel.setSelection(isRegion: true, pixelSize: CGSize(width: 640, height: 480))
+        precondition(button("Zone", in: panelWindow.contentView!).state == .on && button("Écran", in: panelWindow.contentView!).state == .off)
+        precondition(descendants(panelWindow.contentView!).compactMap { $0 as? NSTextField }.contains { $0.stringValue == "Zone · 640 × 480 px" })
+        panel.setSelection(isRegion: false, pixelSize: CGSize(width: 3024, height: 1964))
+        precondition(button("Écran", in: panelWindow.contentView!).state == .on && button("Zone", in: panelWindow.contentView!).state == .off)
+        let snapshot = panelWindow.contentView!
+        snapshot.displayIfNeeded()
+        let bitmap = snapshot.bitmapImageRepForCachingDisplay(in: snapshot.bounds)!
+        snapshot.cacheDisplay(in: snapshot.bounds, to: bitmap)
+        let screenshotURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("replica/clone-screens/capture-bar.png")
+        try files.createDirectory(at: screenshotURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try bitmap.representation(using: .png, properties: [:])!.write(to: screenshotURL)
         panel.refresh(hasPermission: false, busy: false, shortcutFailures: ["⌘⌥⇧5", "⌘⌥⇧6", "⌘⌥⇧7"],
                       hasImage: false, hasVideo: false, isRecording: false)
         verifyLayout(panel.window!, label: "Permission and shortcut errors")
@@ -101,8 +133,16 @@ import AppKit
         verifyLayout(panel.window!, label: "Recording menu")
         var stopped = false
         panel.onStopRecording = { stopped = true }
-        button("Arrêter l’enregistrement", in: panel.window!.contentView!).performClick(nil)
+        button("Arrêter", in: panel.window!.contentView!).performClick(nil)
         precondition(stopped, "Recording menu has no working Stop action")
+        var dismissCount = 0
+        panel.onDismiss = { dismissCount += 1 }
+        panel.hide()
+        precondition(dismissCount == 0 && !panelWindow.isVisible, "Temporary hide dispatched dismissal")
+        panel.present(on: screen)
+        panelWindow.cancelOperation(nil)
+        precondition(dismissCount == 1, "Escape did not dispatch dismissal")
+        precondition(!panelWindow.isVisible, "Escape did not dismiss capture toolbar")
         print("PASS: thumbnail layout; nonactivation; bottom-left placement; image/video actions and copy state; save feedback layout; capture menu permission/errors/recording layout; Stop navigation")
     }
 }

@@ -8,21 +8,23 @@ final class SelectionOverlayController {
     private var screenObserver: NSObjectProtocol?
 
     /// Returns a rectangle in AppKit global points, or nil exactly once on cancellation.
-    func begin(on screen: NSScreen, completion: @escaping (CGRect?) -> Void) {
+    func begin(on screen: NSScreen, confirmation: String = "capturer", completion: @escaping (CGRect?) -> Void) {
         cancel()
         self.completion = completion
-        let overlay = SelectionWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let overlay = SelectionWindow(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         overlay.isReleasedWhenClosed = false
+        overlay.hidesOnDeactivate = false
+        overlay.isFloatingPanel = true
         overlay.backgroundColor = .clear
         overlay.isOpaque = false
         overlay.hasShadow = false
         overlay.level = .screenSaver
-        overlay.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        overlay.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
         overlay.acceptsMouseMovedEvents = true
         overlay.sharingType = .none
         overlay.animationBehavior = .none
         let view = SelectionView(frame: CGRect(origin: .zero, size: screen.frame.size),
-                                 screenFrame: screen.frame, scale: screen.backingScaleFactor)
+                                 screenFrame: screen.frame, scale: screen.backingScaleFactor, confirmation: confirmation)
         view.didFinish = { [weak self] rect in self?.finish(rect) }
         overlay.contentView = view
         window = overlay
@@ -31,8 +33,10 @@ final class SelectionOverlayController {
             // A changed arrangement invalidates the coordinate contract of an in-progress drag.
             Task { @MainActor [weak self] in self?.cancel() }
         }
-        NSApp.activate(ignoringOtherApps: true)
-        overlay.makeKeyAndOrderFront(nil)
+        // A nonactivating panel can own selection keystrokes while the source app
+        // remains frontmost in its current Space (including native fullscreen).
+        overlay.orderFrontRegardless()
+        overlay.makeKey()
         overlay.makeFirstResponder(view)
     }
 
@@ -51,7 +55,7 @@ final class SelectionOverlayController {
 }
 
 @MainActor
-private final class SelectionWindow: NSWindow {
+private final class SelectionWindow: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 }
@@ -70,17 +74,19 @@ private final class SelectionView: NSView {
     var didFinish: ((CGRect?) -> Void)?
     private let screenFrame: CGRect
     private let scale: CGFloat
+    private let confirmation: String
     private var dragStart: CGPoint?
     private var selection: CGRect?
     private var pointer: CGPoint?
     private var tracking: NSTrackingArea?
 
-    init(frame: CGRect, screenFrame: CGRect, scale: CGFloat) {
+    init(frame: CGRect, screenFrame: CGRect, scale: CGFloat, confirmation: String = "capturer") {
         self.screenFrame = screenFrame
         self.scale = scale
+        self.confirmation = confirmation
         super.init(frame: frame)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Sélection de capture. Tracez une zone, Entrée pour capturer, Échap pour annuler.")
+        setAccessibilityLabel("Sélection de capture. Tracez une zone, Entrée pour \(confirmation), Échap pour annuler.")
     }
 
     required init?(coder: NSCoder) { return nil }
@@ -192,8 +198,8 @@ private final class SelectionView: NSView {
         }
 
         let instruction = hasValidSelection
-            ? "Entrée pour capturer  ·  Retracez pour modifier  ·  Échap pour annuler"
-            : "Tracez une zone  ·  Entrée pour capturer  ·  Échap pour annuler"
+            ? "Entrée pour \(confirmation)  ·  Retracez pour modifier  ·  Échap pour annuler"
+            : "Tracez une zone  ·  Entrée pour \(confirmation)  ·  Échap pour annuler"
         let font = NSFont.systemFont(ofSize: 13, weight: .medium)
         let width = min(bounds.width - 32, textSize(instruction, font: font).width + 36)
         drawPill(text: instruction, rect: CGRect(x: (bounds.width - width) / 2, y: 28, width: width, height: 42),

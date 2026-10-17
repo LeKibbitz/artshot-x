@@ -36,7 +36,7 @@ final class RecordingControlBar: NSObject {
         window.isFloatingPanel = true
         window.hidesOnDeactivate = false
         window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
         window.sharingType = .none
         window.backgroundColor = .clear
         window.isOpaque = false

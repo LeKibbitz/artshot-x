@@ -6,6 +6,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum CaptureMode { case display, region, scroll }
     private let capture = CaptureService()
     private let selection = SelectionOverlayController()
+    private let targetOutline = CaptureTargetOutline()
+    private var preparedScreen: NSScreen?
+    private var preparedRegion: CGRect?
     private let scrolling = ScrollingCaptureController()
     private let recording = RecordingController()
     private let library = CaptureLibrary()
@@ -15,9 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var videoPreviews: [UUID: VideoPreviewWindowController] = [:]
     private var statusItem: NSStatusItem?
     private var shortcuts: GlobalShortcuts?
-    private var hiddenWindows: [NSWindow] = []
-    private weak var previousKeyWindow: NSWindow?
-    private var previousExternalApp: NSRunningApplication?
     private var busy = false
     private var presentingOpenPanel = false
     private var quitAfterRecording = false
@@ -26,15 +26,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         panel = CapturePanelController()
         quickAccess = QuickAccessController()
-        panel.onDisplay = { [weak self] in self?.beginCapture(.display) }
-        panel.onRegion = { [weak self] in self?.beginCapture(.region) }
-        panel.onScroll = { [weak self] in self?.beginCapture(.scroll) }
-        panel.onRecord = { [weak self] in self?.beginRecording(nil) }
+        panel.onDisplay = { [weak self] in self?.selectTargetDisplay() }
+        panel.onRegion = { [weak self] in self?.selectTargetRegion() }
+        panel.onSnapshot = { [weak self] in self?.capturePreparedTarget(scrolling: false) }
+        panel.onScroll = { [weak self] in self?.capturePreparedTarget(scrolling: true) }
+        panel.onRecord = { [weak self] in self?.recordPreparedTarget() }
+        panel.onDismiss = { [weak self] in self?.clearPreparedTarget() }
         panel.onStopRecording = { [weak self] in self?.recording.stop() }
-        panel.onLastImage = { [weak self] in self?.openLastImage(nil) }
-        panel.onLastVideo = { [weak self] in self?.openLastVideo(nil) }
-        panel.onOpenImage = { [weak self] in self?.openImage(nil) }
-        panel.onSample = { [weak self] in self?.showPreview(DemoImage.make()) }
+        panel.onLastImage = { [weak self] in self?.hideCaptureSetup(); self?.openLastImage(nil) }
+        panel.onLastVideo = { [weak self] in self?.hideCaptureSetup(); self?.openLastVideo(nil) }
+        panel.onOpenImage = { [weak self] in self?.hideCaptureSetup(); self?.openImage(nil) }
+        panel.onSample = { [weak self] in self?.hideCaptureSetup(); self?.showPreview(DemoImage.make()) }
         panel.onPermission = { [weak self] in self?.requestPermission(nil) }
         quickAccess.onEdit = { [weak self] in self?.editCapture($0) }
         quickAccess.onSave = { [weak self] in self?.saveCapture($0) }
@@ -223,18 +225,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
     }
 
-    private func rememberExternalApp() {
-        if let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-            previousExternalApp = app
-        }
-    }
-
-    private func returnToExternalApp() {
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
-            previousExternalApp?.activate(options: [])
-        }
-    }
-
     private func refreshPanel() {
         let failures = (shortcuts?.unavailable ?? []).map { GlobalShortcuts.labels[Int($0) - 1] }
         panel?.refresh(hasPermission: CaptureService.hasPermission, busy: busy || recording.isBusy || exportingCapture,
@@ -245,11 +235,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showPanel(_ sender: Any?) {
         guard !busy else { return }
         if recording.revealActiveControls() { return }
-        rememberExternalApp()
         refreshPanel()
-        panel.showWindow(nil)
-        panel.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if panel.window?.isVisible != true || preparedScreen == nil {
+            preparedScreen = currentScreen
+            preparedRegion = nil
+        }
+        presentPreparedTarget()
+    }
+
+    private func presentPreparedTarget() {
+        guard let screen = preparedScreen else { return }
+        let rect = preparedRegion ?? screen.frame
+        panel.setSelection(isRegion: preparedRegion != nil,
+                           pixelSize: CGSize(width: rect.width * screen.backingScaleFactor,
+                                             height: rect.height * screen.backingScaleFactor))
+        if let region = preparedRegion { targetOutline.show(region: region) }
+        else { targetOutline.hide() }
+        refreshPanel()
+        panel.present(on: screen)
+    }
+
+    private func selectTargetDisplay() {
+        guard !busy, !recording.isBusy else { return }
+        preparedRegion = nil
+        presentPreparedTarget()
+    }
+
+    private func selectTargetRegion() {
+        guard !busy, !recording.isBusy, let screen = preparedScreen else { return }
+        busy = true
+        panel.hide()
+        targetOutline.hide()
+        selection.begin(on: screen, confirmation: "valider la zone") { [weak self] rect in
+            guard let self else { return }
+            self.busy = false
+            if let rect { self.preparedRegion = rect }
+            self.presentPreparedTarget()
+        }
+    }
+
+    private func clearPreparedTarget() {
+        targetOutline.hide()
+        preparedScreen = nil
+        preparedRegion = nil
+    }
+
+    private func hideCaptureSetup() {
+        panel.hide()
+        clearPreparedTarget()
+    }
+
+    private func capturePreparedTarget(scrolling: Bool) {
+        guard !busy, !exportingCapture, !recording.isBusy,
+              !presentingOpenPanel, NSApp.modalWindow == nil,
+              !NSApp.windows.contains(where: { $0.attachedSheet != nil }),
+              let screen = preparedScreen else { return }
+        guard CaptureService.hasPermission else { requestPermission(nil); return }
+        let rect = preparedRegion ?? screen.frame
+        busy = true
+        hideCaptureSetup()
+        quickAccess.dismiss()
+        refreshPanel()
+        if scrolling { startScrolling(on: screen, region: rect) }
+        else { performCapture(screen: screen, rect: rect) }
+    }
+
+    private func recordPreparedTarget() {
+        guard !busy, !exportingCapture, !recording.isBusy,
+              !presentingOpenPanel, NSApp.modalWindow == nil,
+              !NSApp.windows.contains(where: { $0.attachedSheet != nil }),
+              let screen = preparedScreen else { return }
+        let region = preparedRegion
+        hideCaptureSetup()
+        quickAccess.dismiss()
+        recording.present(on: screen, region: region)
     }
 
     @objc private func requestPermission(_ sender: Any?) {
@@ -271,29 +330,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               !NSApp.windows.contains(where: { $0.attachedSheet != nil }) else { return }
         guard CaptureService.hasPermission else { showPanel(nil); requestPermission(nil); return }
         guard let screen = currentScreen else { return }
-        rememberExternalApp()
         busy = true
         refreshPanel()
-        previousKeyWindow = NSApp.keyWindow
-        hiddenWindows = (previews.values.compactMap(\.window) + videoPreviews.values.compactMap(\.window)).filter(\.isVisible)
-        hiddenWindows.forEach { $0.orderOut(nil) }
-        panel.window?.orderOut(nil)
+        hideCaptureSetup()
         quickAccess.dismiss()
         if mode == .display { performCapture(screen: screen, rect: nil); return }
-        selection.begin(on: screen) { [weak self] rect in
+        selection.begin(on: screen, confirmation: mode == .scroll ? "valider la zone" : "capturer") { [weak self] rect in
             guard let self else { return }
-            guard let rect else { self.finishCapture(restoreEditors: true); return }
+            guard let rect else { self.finishCapture(); return }
             if mode == .scroll {
-                self.returnToExternalApp()
-                self.scrolling.begin(on: screen, region: rect) { [weak self] result in
-                    guard let self else { return }
-                    guard let result else { self.finishCapture(restoreEditors: true); return }
-                    switch result {
-                    case .success(let image): self.received(image, on: screen)
-                    case .failure(let error): self.finishCapture(restoreEditors: true); self.showError(error)
-                    }
-                }
+                self.startScrolling(on: screen, region: rect)
             } else { self.performCapture(screen: screen, rect: rect) }
+        }
+    }
+
+    private func startScrolling(on screen: NSScreen, region: CGRect) {
+        scrolling.begin(on: screen, region: region) { [weak self] result in
+            guard let self else { return }
+            guard let result else { self.finishCapture(); return }
+            switch result {
+            case .success(let image): self.received(image, on: screen)
+            case .failure(let error): self.finishCapture(); self.showError(error)
+            }
         }
     }
 
@@ -305,28 +363,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let rect { image = try await capture.captureRegion(rect, on: screen) }
                 else { image = try await capture.captureDisplay(screen) }
                 received(image, on: screen)
-            } catch { finishCapture(restoreEditors: true); showError(error) }
+            } catch { finishCapture(); showError(error) }
         }
     }
 
     private func received(_ image: NSImage, on screen: NSScreen) {
         do {
             let item = try library.add(image: image)
-            finishCapture(restoreEditors: false)
+            finishCapture()
             quickAccess.present(item, on: screen)
-        } catch { finishCapture(restoreEditors: true); showError(error) }
+        } catch { finishCapture(); showError(error) }
     }
 
-    private func finishCapture(restoreEditors: Bool) {
-        if restoreEditors {
-            hiddenWindows.forEach { $0.orderFront(nil) }
-            previousKeyWindow?.makeKeyAndOrderFront(nil)
-        }
-        previousKeyWindow = nil
-        hiddenWindows.removeAll()
+    private func finishCapture() {
         busy = false
         refreshPanel()
-        returnToExternalApp()
     }
 
     @objc private func toggleRecording(_ sender: Any?) {
@@ -336,8 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func beginRecording(_ sender: Any?) {
         guard !busy, !exportingCapture, !recording.isBusy, !presentingOpenPanel, NSApp.modalWindow == nil,
               !NSApp.windows.contains(where: { $0.attachedSheet != nil }), let screen = currentScreen else { return }
-        rememberExternalApp()
-        panel.window?.orderOut(nil)
+        hideCaptureSetup()
         quickAccess.dismiss()
         recording.present(on: screen)
     }

@@ -37,6 +37,8 @@ final class CapturePanelController: NSWindowController {
     private let statusPopover = NSPopover()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private var recording = false
+    private var selectionReady = true
+    private var captureBusy = false
 
     init() {
         let panel = CaptureToolbarPanel(contentRect: NSRect(origin: .zero, size: Style.size),
@@ -45,10 +47,12 @@ final class CapturePanelController: NSWindowController {
         panel.title = "ArtShot X · Capture"
         panel.onCancel = { [weak self] in self?.dismiss() }
         panel.isReleasedWhenClosed = false
-        panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .canJoinAllApplications]
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
+        // Set this after isFloatingPanel, which resets NSPanel's level to floating.
+        // Keep the actions above the selection overlay, below native menus and popovers.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.sharingType = .none
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -132,20 +136,46 @@ final class CapturePanelController: NSWindowController {
         selectionLabel.stringValue = "\(isRegion ? "Zone" : "Écran") · \(Int(pixelSize.width)) × \(Int(pixelSize.height)) px"
     }
 
-    func present(on screen: NSScreen) {
+    func setSelectionReady(_ ready: Bool) {
+        selectionReady = ready
+        if !ready {
+            selectionLabel.stringValue = "Tracez une zone ou choisissez Écran"
+            captureButtons.prefix(2).forEach { $0.state = .off; $0.contentTintColor = Style.foreground }
+        }
+        updateCaptureButtons()
+    }
+
+    private func updateCaptureButtons() {
+        captureButtons.prefix(2).forEach { $0.isEnabled = !captureBusy && !recording }
+        captureButtons.dropFirst(2).forEach { $0.isEnabled = selectionReady && !captureBusy && !recording }
+        if recording { videoButton.isEnabled = true }
+    }
+
+    func present(on screen: NSScreen, avoiding region: CGRect? = nil, takeKeyboard: Bool = true) {
         guard let window else { return }
         let visible = screen.visibleFrame
-        window.setFrameOrigin(NSPoint(x: max(visible.minX, visible.midX - window.frame.width / 2),
-                                      y: visible.minY + 34))
+        let margin: CGFloat = 16
+        let size = window.frame.size
+        var origin = NSPoint(x: max(visible.minX, visible.midX - size.width / 2), y: visible.minY + 34)
+        if let region {
+            origin.x = max(visible.minX, min(visible.maxX - size.width, region.midX - size.width / 2))
+            if region.minY - size.height - margin >= visible.minY {
+                origin.y = region.minY - size.height - margin
+            } else if region.maxY + margin + size.height <= visible.maxY {
+                origin.y = region.maxY + margin
+            } else {
+                origin.y = min(visible.maxY - size.height, max(visible.minY, region.minY + margin))
+            }
+        }
+        window.setFrameOrigin(origin)
         window.orderFrontRegardless()
-        // Keyboard control belongs to this temporary panel; the browser stays active.
-        window.makeKey()
+        if takeKeyboard { window.makeKey() }
     }
 
     func refresh(hasPermission: Bool, busy: Bool, shortcutFailures: [String], hasImage: Bool, hasVideo: Bool, isRecording: Bool) {
         recording = isRecording
-        captureButtons.forEach { $0.isEnabled = !busy && !isRecording }
-        videoButton.isEnabled = isRecording || !busy
+        captureBusy = busy
+        updateCaptureButtons()
         videoButton.title = isRecording ? "Arrêter" : "Vidéo"
         videoButton.image = NSImage(systemSymbolName: isRecording ? "stop.circle.fill" : "record.circle", accessibilityDescription: nil)
         videoButton.setAccessibilityLabel(isRecording ? "Arrêter l’enregistrement" : "Vidéo")

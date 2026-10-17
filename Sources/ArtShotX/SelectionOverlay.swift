@@ -6,6 +6,42 @@ final class SelectionOverlayController {
     private var window: SelectionWindow?
     private var completion: ((CGRect?) -> Void)?
     private var screenObserver: NSObjectProtocol?
+    private var onChange: ((CGRect?) -> Void)?
+    private var onCancel: (() -> Void)?
+    private(set) var isPreparing = false
+    var currentPreparedRect: CGRect? { (window?.contentView as? SelectionView)?.globalSelection }
+
+    func beginPreparation(on screen: NSScreen, initialRect: CGRect? = nil,
+                          onChange: @escaping (CGRect?) -> Void, onCancel: @escaping () -> Void) {
+        cancel()
+        begin(on: screen) { _ in }
+        completion = nil
+        window?.level = .statusBar
+        isPreparing = true
+        self.onChange = onChange
+        self.onCancel = onCancel
+        let view = window?.contentView as? SelectionView
+        view?.isPreparing = true
+        view?.didChange = { [weak self] rect in self?.onChange?(rect) }
+        view?.setGlobalSelection(initialRect)
+    }
+
+    func closePreparation() {
+        guard isPreparing else { return }
+        onCancel = nil
+        finish(nil)
+    }
+
+    func setPreparedRect(_ rect: CGRect?) {
+        guard isPreparing, let view = window?.contentView as? SelectionView else { return }
+        view.setGlobalSelection(rect)
+        onChange?(view.globalSelection)
+    }
+
+    func revealPreparation() {
+        guard isPreparing else { return }
+        window?.orderFrontRegardless()
+    }
 
     /// Returns a rectangle in AppKit global points, or nil exactly once on cancellation.
     func begin(on screen: NSScreen, confirmation: String = "capturer", completion: @escaping (CGRect?) -> Void) {
@@ -44,13 +80,18 @@ final class SelectionOverlayController {
 
     private func finish(_ rect: CGRect?) {
         let callback = completion
+        let cancellation = rect == nil ? onCancel : nil
         completion = nil
+        onCancel = nil
+        onChange = nil
+        isPreparing = false
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         screenObserver = nil
         window?.orderOut(nil)
         window?.close()
         window = nil
         callback?(rect)
+        cancellation?()
     }
 }
 
@@ -69,9 +110,60 @@ private final class SelectionView: NSView {
         static let secondary = NSColor(calibratedWhite: 0.78, alpha: 1)
         static let radius: CGFloat = 12
         static let minimumSide: CGFloat = 2
+        static let handleHitRadius: CGFloat = 9
+        static let handleDiameter: CGFloat = 6
     }
 
     var didFinish: ((CGRect?) -> Void)?
+    var didChange: ((CGRect?) -> Void)?
+    var isPreparing = false {
+        didSet {
+            setAccessibilityLabel(isPreparing
+                ? "Sélection de capture. Tracez, déplacez ou redimensionnez une zone. Échap pour annuler."
+                : "Sélection de capture. Tracez une zone, Entrée pour \(confirmation), Échap pour annuler.")
+            needsDisplay = true
+        }
+    }
+    var globalSelection: CGRect? {
+        selection.map { CaptureGeometry.globalRect(fromLocal: $0, screenFrame: screenFrame) }
+    }
+    func setGlobalSelection(_ rect: CGRect?) {
+        dragStart = nil
+        selection = rect.flatMap { rect in
+            guard rect.origin.x.isFinite, rect.origin.y.isFinite,
+                  rect.width.isFinite, rect.height.isFinite else { return nil }
+            let local = rect.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY).intersection(bounds)
+            return local.width >= Style.minimumSide && local.height >= Style.minimumSide ? local : nil
+        }
+        needsDisplay = true
+    }
+    private enum DragMode { case draw, move(CGRect), resize(CGRect, Int) }
+    private var dragMode: DragMode = .draw
+
+    private func handles(_ rect: CGRect) -> [CGPoint] {
+        [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.midX, y: rect.minY),
+         CGPoint(x: rect.maxX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.midY),
+         CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.midX, y: rect.maxY),
+         CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.midY)]
+    }
+
+    private func updateSelection(to point: CGPoint) {
+        guard let start = dragStart else { return }
+        switch dragMode {
+        case .draw: selection = CaptureGeometry.rectangle(from: start, to: point)
+        case .move(let rect):
+            selection = CGRect(x: min(max(bounds.minX, rect.minX + point.x - start.x), bounds.maxX - rect.width),
+                               y: min(max(bounds.minY, rect.minY + point.y - start.y), bounds.maxY - rect.height),
+                               width: rect.width, height: rect.height)
+        case .resize(let rect, let handle):
+            var x1 = rect.minX, x2 = rect.maxX, y1 = rect.minY, y2 = rect.maxY
+            if [0, 6, 7].contains(handle) { x1 = min(point.x, x2 - Style.minimumSide) }
+            if [2, 3, 4].contains(handle) { x2 = max(point.x, x1 + Style.minimumSide) }
+            if [0, 1, 2].contains(handle) { y1 = min(point.y, y2 - Style.minimumSide) }
+            if [4, 5, 6].contains(handle) { y2 = max(point.y, y1 + Style.minimumSide) }
+            selection = CGRect(x: x1, y: y1, width: x2 - x1, height: y2 - y1)
+        }
+    }
     private let screenFrame: CGRect
     private let scale: CGFloat
     private let confirmation: String
@@ -104,11 +196,30 @@ private final class SelectionView: NSView {
         tracking = area
     }
 
-    override func mouseEntered(with event: NSEvent) { NSCursor.crosshair.set() }
+    private func updateCursor(at point: CGPoint) {
+        if dragStart != nil, case .move = dragMode { NSCursor.closedHand.set(); return }
+        guard let selection else { NSCursor.crosshair.set(); return }
+        if let handle = handles(selection).firstIndex(where: {
+            abs($0.x - point.x) <= Style.handleHitRadius && abs($0.y - point.y) <= Style.handleHitRadius
+        }) {
+            switch handle {
+            case 1, 5: NSCursor.resizeUpDown.set()
+            case 3, 7: NSCursor.resizeLeftRight.set()
+            default: NSCursor.crosshair.set()
+            }
+        } else if selection.contains(point) {
+            NSCursor.openHand.set()
+        } else {
+            NSCursor.crosshair.set()
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) { updateCursor(at: point(for: event)) }
     override func mouseExited(with event: NSEvent) { pointer = nil; needsDisplay = true }
 
     override func mouseMoved(with event: NSEvent) {
         pointer = point(for: event)
+        updateCursor(at: point(for: event))
         needsDisplay = true
     }
 
@@ -116,31 +227,41 @@ private final class SelectionView: NSView {
         let point = point(for: event)
         dragStart = point
         pointer = point
-        selection = nil
+        if let selection, let handle = handles(selection).firstIndex(where: { abs($0.x - point.x) <= Style.handleHitRadius && abs($0.y - point.y) <= Style.handleHitRadius }) {
+            dragMode = .resize(selection, handle)
+        } else if let selection, selection.contains(point) {
+            dragMode = .move(selection)
+        } else {
+            dragMode = .draw
+            selection = nil
+        }
+        updateCursor(at: point)
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let dragStart else { return }
+        guard dragStart != nil else { return }
         let point = point(for: event)
         pointer = point
-        selection = CaptureGeometry.rectangle(from: dragStart, to: point)
+        updateSelection(to: point)
+        updateCursor(at: point)
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        if let dragStart {
-            selection = CaptureGeometry.rectangle(from: dragStart, to: point(for: event))
-        }
+        updateSelection(to: point(for: event))
         dragStart = nil
+        updateCursor(at: point(for: event))
         if !hasValidSelection { selection = nil }
         needsDisplay = true
+        didChange?(globalSelection)
     }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53: didFinish?(nil)
         case 36, 76:
+            if isPreparing { didChange?(globalSelection); return }
             guard hasValidSelection, let selection else { NSSound.beep(); return }
             didFinish?(CaptureGeometry.globalRect(fromLocal: selection, screenFrame: screenFrame))
         default: break
@@ -185,20 +306,23 @@ private final class SelectionView: NSView {
             border.lineWidth = 1.5
             border.stroke()
             drawHandles(around: selection)
-            let global = CaptureGeometry.globalRect(fromLocal: selection, screenFrame: screenFrame)
-            let aligned = CaptureGeometry.pixelAlignedSourceRect(for: global, screenFrame: screenFrame, scale: scale)
-            let pixels = CaptureGeometry.pixelSize(for: aligned?.size ?? selection.size, scale: scale) ?? .zero
-            let dimensions = "\(Int(pixels.width)) × \(Int(pixels.height)) px"
-            let labelSize = textSize(dimensions, font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium))
-            let width = labelSize.width + 24
-            let x = min(max(12, selection.midX - width / 2), max(12, bounds.width - width - 12))
-            let y = selection.minY >= 48 ? selection.minY - 38 : min(bounds.height - 38, selection.maxY + 10)
-            drawPill(text: dimensions, rect: CGRect(x: x, y: y, width: width, height: 28),
-                     font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium), color: .white)
+            if !isPreparing {
+                let global = CaptureGeometry.globalRect(fromLocal: selection, screenFrame: screenFrame)
+                let aligned = CaptureGeometry.pixelAlignedSourceRect(for: global, screenFrame: screenFrame, scale: scale)
+                let pixels = CaptureGeometry.pixelSize(for: aligned?.size ?? selection.size, scale: scale) ?? .zero
+                let dimensions = "\(Int(pixels.width)) × \(Int(pixels.height)) px"
+                let labelSize = textSize(dimensions, font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium))
+                let width = labelSize.width + 24
+                let x = min(max(12, selection.midX - width / 2), max(12, bounds.width - width - 12))
+                let y = selection.minY >= 48 ? selection.minY - 38 : min(bounds.height - 38, selection.maxY + 10)
+                drawPill(text: dimensions, rect: CGRect(x: x, y: y, width: width, height: 28),
+                         font: .monospacedDigitSystemFont(ofSize: 12, weight: .medium), color: .white)
+            }
         }
 
+        guard !isPreparing else { return }
         let instruction = hasValidSelection
-            ? "Entrée pour \(confirmation)  ·  Retracez pour modifier  ·  Échap pour annuler"
+            ? "Entrée pour \(confirmation)  ·  Déplacez ou redimensionnez  ·  Échap pour annuler"
             : "Tracez une zone  ·  Entrée pour \(confirmation)  ·  Échap pour annuler"
         let font = NSFont.systemFont(ofSize: 13, weight: .medium)
         let width = min(bounds.width - 32, textSize(instruction, font: font).width + 36)
@@ -208,9 +332,9 @@ private final class SelectionView: NSView {
 
     private func drawHandles(around rect: CGRect) {
         Style.accent.setFill()
-        for point in [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
-                      CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)] {
-            NSBezierPath(ovalIn: CGRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)).fill()
+        for point in handles(rect) {
+            NSBezierPath(ovalIn: CGRect(x: point.x - Style.handleDiameter / 2, y: point.y - Style.handleDiameter / 2,
+                                       width: Style.handleDiameter, height: Style.handleDiameter)).fill()
         }
     }
 

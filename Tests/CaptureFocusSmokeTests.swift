@@ -1,9 +1,10 @@
 // HARNESS: SelectionOverlay.swift
 extension SelectionOverlayController {
-    @MainActor func completeTestRegion() {
+    @MainActor var testWindow: NSWindow? { window }
+    @MainActor func dragTestRegion(from start: NSPoint = NSPoint(x: 20, y: 20), to end: NSPoint = NSPoint(x: 180, y: 140)) {
         let overlay = window!
         let view = overlay.contentView!
-        for (type, point) in [(NSEvent.EventType.leftMouseDown, NSPoint(x: 20, y: 20)), (.leftMouseDragged, NSPoint(x: 180, y: 140)), (.leftMouseUp, NSPoint(x: 180, y: 140))] {
+        for (type, point) in [(NSEvent.EventType.leftMouseDown, start), (.leftMouseDragged, end), (.leftMouseUp, end)] {
             let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: overlay.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
             switch type {
             case .leftMouseDown: view.mouseDown(with: event)
@@ -11,7 +12,6 @@ extension SelectionOverlayController {
             default: view.mouseUp(with: event)
             }
         }
-        FocusProbe.key(36, to: overlay)
     }
 
     @MainActor static func checkFocus(on screen: NSScreen) {
@@ -59,8 +59,8 @@ extension ScrollingCaptureController {
 }
 // HARNESS: RecordingController.swift
 extension RecordingController {
-    @MainActor func assertPreparedTestRegion(_ region: CGRect, on targetScreen: NSScreen) {
-        precondition(sourceRegion == region && screen === targetScreen && regionButton.state == .on,
+    @MainActor func assertPreparedTestRegion(_ region: CGRect?, on targetScreen: NSScreen) {
+        precondition(sourceRegion == region && screen === targetScreen && regionButton.state == (region == nil ? .off : .on),
                      "Video options did not inherit the prepared capture area")
         precondition(cameraSource == nil, "Prepared video test must not open camera hardware")
     }
@@ -82,6 +82,14 @@ extension RecordingController {
         controller.cancel()
     }
 }
+// HARNESS: CapturePanelController.swift
+extension CapturePanelController {
+    @MainActor func assertTestActionsReady(_ ready: Bool) {
+        let actions = captureButtons.filter { ["Photo", "Défilement", "Vidéo"].contains($0.title) }
+        precondition(actions.count == 3 && actions.allSatisfy { $0.isEnabled == ready },
+                     "Capture actions must become available only after choosing an area")
+    }
+}
 // HARNESS: AppDelegate.swift
 extension AppDelegate {
     @MainActor static func checkFocus() {
@@ -97,38 +105,51 @@ extension AppDelegate {
         precondition(editor.isVisible && editor.frame == frame, "Opening capture controls hid or moved an editor")
         precondition(!editor.isKeyWindow && !editor.isMainWindow, "Opening capture controls promoted an editor")
         let targetScreen = delegate.preparedScreen!
-        delegate.selectTargetRegion()
-        precondition(delegate.busy && !delegate.panel.window!.isVisible)
-        delegate.selection.completeTestRegion()
+        precondition(delegate.selection.isPreparing && delegate.panel.window!.isVisible,
+                     "Opening capture must immediately show the editable overlay and toolbar")
+        delegate.panel.assertTestActionsReady(false)
+        delegate.selection.dragTestRegion()
+        delegate.panel.assertTestActionsReady(true)
         let region = delegate.preparedRegion!
         precondition(region.size == CGSize(width: 160, height: 120))
-        precondition(!delegate.busy && delegate.panel.window!.isVisible && !delegate.recording.isBusy,
-                     "Preparing a region must return to the action bar without starting capture")
+        precondition(delegate.selection.isPreparing && delegate.selection.testWindow!.isVisible && delegate.panel.window!.isVisible && !delegate.recording.isBusy,
+                     "Mouse release must reveal actions while preserving the editable selection")
+        precondition(delegate.panel.window!.level.rawValue > delegate.selection.testWindow!.level.rawValue,
+                     "Capture actions must remain above the selection overlay: toolbar=\(delegate.panel.window!.level.rawValue), overlay=\(delegate.selection.testWindow!.level.rawValue)")
         precondition(delegate.preparedScreen === targetScreen, "Selection changed the target display")
+        delegate.showPanel(nil)
+        precondition(delegate.preparedRegion == region && delegate.selection.isPreparing,
+                     "Repeated capture shortcut discarded the prepared area")
+        delegate.selection.dragTestRegion(from: NSPoint(x: 100, y: 80), to: NSPoint(x: 120, y: 100))
+        let moved = delegate.preparedRegion!
+        precondition(moved == region.offsetBy(dx: 20, dy: 20), "Interior drag did not update the prepared target")
+        delegate.selection.dragTestRegion(from: NSPoint(x: 200, y: 100), to: NSPoint(x: 230, y: 100))
+        let adjusted = delegate.preparedRegion!
+        precondition(adjusted.origin == moved.origin && adjusted.size == CGSize(width: 190, height: 120),
+                     "Edge handle resize did not update the prepared target")
         delegate.recordPreparedTarget()
-        delegate.recording.assertPreparedTestRegion(region, on: targetScreen)
+        delegate.recording.assertPreparedTestRegion(adjusted, on: targetScreen)
+        precondition(!delegate.selection.isPreparing && delegate.selection.testWindow == nil,
+                     "Video options must close the selection overlay")
         precondition(delegate.preparedScreen == nil && !delegate.panel.window!.isVisible)
         delegate.recording.cancel()
-        delegate.preparedScreen = targetScreen
-        delegate.preparedRegion = region
+        delegate.showPanel(nil)
+        delegate.selection.dragTestRegion()
+        FocusProbe.key(53, to: delegate.selection.testWindow!)
+        precondition(!delegate.selection.isPreparing && delegate.selection.testWindow == nil && !delegate.panel.window!.isVisible,
+                     "Escape must dismiss both selection and capture actions")
+        precondition(delegate.preparedScreen == nil && delegate.preparedRegion == nil,
+                     "Escape must clear the prepared target")
+        delegate.showPanel(nil)
+        let display = delegate.preparedScreen!
         delegate.selectTargetDisplay()
-        precondition(delegate.preparedRegion == nil && delegate.preparedScreen === targetScreen && delegate.panel.window!.isVisible,
-                     "Display selection did not clear the prepared region")
+        precondition(delegate.preparedRegion == display.frame && delegate.selection.isPreparing,
+                     "Display selection must prepare the complete display")
+        delegate.panel.assertTestActionsReady(true)
+        delegate.recordPreparedTarget()
+        delegate.recording.assertPreparedTestRegion(nil, on: display)
+        delegate.recording.cancel()
         delegate.clearPreparedTarget()
-    }
-}
-// HARNESS: CaptureTargetOutline.swift
-extension CaptureTargetOutline {
-    @MainActor static func checkFocus(on screen: NSScreen) {
-        let outline = CaptureTargetOutline()
-        let region = screen.frame.insetBy(dx: 100, dy: 100)
-        outline.show(region: region)
-        let window = outline.panel!
-        FocusProbe.checkPanel(window, on: screen, key: false)
-        precondition(window.ignoresMouseEvents && window.frame == region && window.sharingType == .none,
-                     "Prepared area outline must preserve scrolling input and stay outside captures")
-        outline.hide()
-        precondition(outline.panel == nil)
     }
 }
 // HARNESS: Main.swift
@@ -171,8 +192,7 @@ import AppKit
         AppDelegate.checkFocus(); unchanged()
         SelectionOverlayController.checkFocus(on: screen); unchanged()
         ScrollingCaptureController.checkFocus(on: screen); unchanged()
-        CaptureTargetOutline.checkFocus(on: screen); unchanged()
         RecordingController.checkFocus(on: screen); unchanged()
-        print("PASS: capture menu/editor isolation and prepared region/display/video routing; input-transparent target outline; selection Enter/Escape and exactly-once completion; scroll HUD; recording options/reveal/region cancellation; foreground app and Space preserved without global input or capture hardware")
+        print("PASS: capture menu/editor isolation; persistent selection, mouse-release actions, interior move, edge resize, repeated shortcut, Escape cleanup and adjusted video routing; selection Enter/Escape and exactly-once completion; scroll HUD; recording options/reveal/region cancellation; foreground app and Space preserved without global input or capture hardware")
     }
 }

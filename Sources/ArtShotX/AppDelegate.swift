@@ -6,7 +6,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum CaptureMode { case display, region, scroll }
     private let capture = CaptureService()
     private let selection = SelectionOverlayController()
-    private let targetOutline = CaptureTargetOutline()
     private var preparedScreen: NSScreen?
     private var preparedRegion: CGRect?
     private let scrolling = ScrollingCaptureController()
@@ -235,47 +234,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showPanel(_ sender: Any?) {
         guard !busy else { return }
         if recording.revealActiveControls() { return }
-        refreshPanel()
-        if panel.window?.isVisible != true || preparedScreen == nil {
-            preparedScreen = currentScreen
+        if !selection.isPreparing {
+            guard let screen = currentScreen else { return }
+            preparedScreen = screen
             preparedRegion = nil
+            selection.beginPreparation(on: screen, onChange: { [weak self] rect in
+                guard let self else { return }
+                self.preparedRegion = rect
+                self.presentPreparedTarget()
+            }, onCancel: { [weak self] in
+                self?.panel.hide()
+                self?.clearPreparedTarget()
+            })
         }
         presentPreparedTarget()
     }
 
     private func presentPreparedTarget() {
         guard let screen = preparedScreen else { return }
-        let rect = preparedRegion ?? screen.frame
-        panel.setSelection(isRegion: preparedRegion != nil,
-                           pixelSize: CGSize(width: rect.width * screen.backingScaleFactor,
-                                             height: rect.height * screen.backingScaleFactor))
-        if let region = preparedRegion { targetOutline.show(region: region) }
-        else { targetOutline.hide() }
+        if let rect = preparedRegion {
+            panel.setSelection(isRegion: rect != screen.frame,
+                               pixelSize: CGSize(width: rect.width * screen.backingScaleFactor,
+                                                 height: rect.height * screen.backingScaleFactor))
+        }
+        panel.setSelectionReady(preparedRegion != nil)
         refreshPanel()
-        panel.present(on: screen)
+        selection.revealPreparation()
+        panel.present(on: screen, avoiding: preparedRegion, takeKeyboard: false)
     }
 
     private func selectTargetDisplay() {
-        guard !busy, !recording.isBusy else { return }
-        preparedRegion = nil
-        presentPreparedTarget()
+        guard !busy, !recording.isBusy, let screen = preparedScreen else { return }
+        selection.setPreparedRect(screen.frame)
     }
 
     private func selectTargetRegion() {
-        guard !busy, !recording.isBusy, let screen = preparedScreen else { return }
-        busy = true
-        panel.hide()
-        targetOutline.hide()
-        selection.begin(on: screen, confirmation: "valider la zone") { [weak self] rect in
-            guard let self else { return }
-            self.busy = false
-            if let rect { self.preparedRegion = rect }
-            self.presentPreparedTarget()
-        }
+        guard !busy, !recording.isBusy, preparedScreen != nil else { return }
+        selection.setPreparedRect(nil)
     }
 
     private func clearPreparedTarget() {
-        targetOutline.hide()
+        selection.closePreparation()
         preparedScreen = nil
         preparedRegion = nil
     }
@@ -289,9 +288,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !busy, !exportingCapture, !recording.isBusy,
               !presentingOpenPanel, NSApp.modalWindow == nil,
               !NSApp.windows.contains(where: { $0.attachedSheet != nil }),
-              let screen = preparedScreen else { return }
+              let screen = preparedScreen, let rect = preparedRegion else { return }
         guard CaptureService.hasPermission else { requestPermission(nil); return }
-        let rect = preparedRegion ?? screen.frame
         busy = true
         hideCaptureSetup()
         quickAccess.dismiss()
@@ -304,8 +302,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !busy, !exportingCapture, !recording.isBusy,
               !presentingOpenPanel, NSApp.modalWindow == nil,
               !NSApp.windows.contains(where: { $0.attachedSheet != nil }),
-              let screen = preparedScreen else { return }
-        let region = preparedRegion
+              let screen = preparedScreen, let selected = preparedRegion else { return }
+        let region: CGRect? = selected == screen.frame ? nil : selected
         hideCaptureSetup()
         quickAccess.dismiss()
         recording.present(on: screen, region: region)
@@ -313,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func requestPermission(_ sender: Any?) {
         guard !busy else { return }
+        hideCaptureSetup()
         if !CaptureService.hasPermission { CaptureService.requestPermission() }
         refreshPanel()
         if !CaptureService.hasPermission,

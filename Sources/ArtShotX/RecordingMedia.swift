@@ -185,6 +185,19 @@ enum RecordingComposition {
             throw RecordingFailure.message("Impossible de préparer l’export vidéo.")
         }
         exporter.videoComposition = videoComposition
+        let audioTracks = composition.tracks(withMediaType: .audio)
+        if !audioTracks.isEmpty {
+            // Explicit mixing renders enabled sources into one portable AAC track.
+            // Reserve headroom when the microphone and system audio overlap.
+            let mix = AVMutableAudioMix()
+            let gain: Float = audioTracks.count > 1 ? 0.5 : 1
+            mix.inputParameters = audioTracks.map { track in
+                let parameters = AVMutableAudioMixInputParameters(track: track)
+                parameters.setVolume(gain, at: .zero)
+                return parameters
+            }
+            exporter.audioMix = mix
+        }
         exporter.outputFileType = .mp4
         exporter.outputURL = temporary
         exporter.shouldOptimizeForNetworkUse = true

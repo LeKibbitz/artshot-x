@@ -46,3 +46,13 @@ The 16 geometry/stitching tests and the preview, recording, library and capture-
 The installed capture panel was inspected through macOS accessibility and screenshot tools: capture, region, scrolling, recording, recent media and permission actions were visible, and no hotkey registration failure was reported. This establishes successful registration, not physical key delivery. The changed ad-hoc signature left macOS showing screen recording enabled while both the preflight check and a real ScreenCaptureKit recording attempt were denied by TCC. Reauthorization of the installed bundle is required. No live capture success or physical camera/microphone acceptance is claimed.
 
 For a developer UI check, launch the executable with `--show-capture-panel`. Normal launch has no window.
+
+## Successful capture acceptance — 2026-10-17
+
+After the user authorized replacing only the ArtShot X screen-recording entry and authenticated with Touch ID, the installed app was re-added and relaunched. A real display capture produced a 3024 × 1964 PNG and the lower-left thumbnail with Delete/Edit/Save/Copy actions. The user confirmed the three physical shortcuts (Command–Option–Shift–5/6/7).
+
+A real 12.43-second MOV contained H.264 screen footage at 1512 × 982, H.264 camera footage at 640 × 480, system audio (stereo AAC), microphone audio (mono AAC) and click metadata. All four media tracks decoded without errors. This confirms received media and usable files; subjective sound quality and audiovisual synchronization were not measured.
+
+The live export exposed a compatibility issue: separate system/microphone MP4 tracks could cause a player to select only one source. Export now uses an explicit audio mix, preserving separate sources only in the original MOV. Regression tests verify that system 440 Hz and microphone 880 Hz tones coexist in one exported AAC stream, and that system-only, microphone-only and silent exports respect the toggles. Re-exporting the real recording yielded a 12.433333-second MP4 with one H.264 video stream and one stereo AAC stream, decoded without errors.
+
+The corrected binary was installed and its capture authorization renewed. A subsequent real PNG capture succeeded. Test recordings and exports remain local and are excluded from Git.

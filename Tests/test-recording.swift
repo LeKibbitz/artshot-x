@@ -56,8 +56,9 @@ struct RecordingSmokeTest {
             let time = CMTime(value: Int64(index), timescale: 30)
             guard screen.append(red, withPresentationTime: time) else { throw writer.error! }
             if index >= 6 && index < 54 { guard camera.append(blue, withPresentationTime: time) else { throw writer.error! } }
-            let audio = try audioBuffer(time: time)
-            guard system.append(audio), mic.append(audio) else { throw writer.error! }
+            let systemTone = try audioBuffer(time: time, frequency: 440)
+            let microphoneTone = try audioBuffer(time: time, frequency: 880)
+            guard system.append(systemTone), mic.append(microphoneTone) else { throw writer.error! }
         }
         writer.endSession(atSourceTime: CMTime(seconds: 2, preferredTimescale: 600))
         for input in [screenInput, cameraInput, system, mic] { input.markAsFinished() }
@@ -91,6 +92,27 @@ struct RecordingSmokeTest {
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             precondition(videos.count == 1)
             precondition((attributes[.size] as! NSNumber).intValue > 1000)
+        }
+        let mixedTracks = try await AVURLAsset(url: withCamera).loadTracks(withMediaType: .audio)
+        let silentTracks = try await AVURLAsset(url: withoutCamera).loadTracks(withMediaType: .audio)
+        precondition(mixedTracks.count == 1, "Two enabled sources must export as one portable AAC track")
+        let mixedFormats = try await mixedTracks[0].load(.formatDescriptions)
+        precondition(mixedFormats.allSatisfy { CMFormatDescriptionGetMediaSubType($0) == kAudioFormatMPEG4AAC }, "The portable mixed audio track must be AAC")
+        precondition(silentTracks.isEmpty, "Disabling both sources must remove audio")
+        let mixedTones = try await toneAmplitudes(withCamera)
+        precondition(mixedTones.system > 0.06 && mixedTones.microphone > 0.06, "The exported AAC track must contain both source tones")
+        for enableSystem in [true, false] {
+            var single = edit
+            single.systemAudio = enableSystem
+            single.microphone = !enableSystem
+            let target = folder.appendingPathComponent(enableSystem ? "system-only.mp4" : "mic-only.mp4")
+            try await RecordingComposition.export(url: raw, edit: single, to: target)
+            let tracks = try await AVURLAsset(url: target).loadTracks(withMediaType: .audio)
+            precondition(tracks.count == 1, "A single enabled source must export one AAC track")
+            let tones = try await toneAmplitudes(target)
+            let enabled = enableSystem ? tones.system : tones.microphone
+            let disabled = enableSystem ? tones.microphone : tones.system
+            precondition(enabled > 0.15 && disabled < 0.015, "Source toggles must retain only the selected tone")
         }
         // Existing save targets must be replaced only after a complete export.
         try await RecordingComposition.export(url: raw, edit: edit, to: withoutCamera)
@@ -146,21 +168,58 @@ struct RecordingSmokeTest {
             if blockedSidecar { precondition(warning!.contains(interruptedURL.path), "Failed sidecar warning must identify the preserved movie") }
             else { precondition(RecordingMetadata.read(interruptedURL)?.warning != nil, "Stream interruption must be saved as a warning") }
         }
-        print("PASS: separate camera/audio tracks, camera timing, editable effects, atomic MP4 replacement, trim, AZERTY labels; interrupted-stream and failed-sidecar MOV preservation")
+        print("PASS: separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
     }
 
-    static func audioBuffer(time: CMTime) throws -> CMSampleBuffer {
+    static func audioBuffer(time: CMTime, frequency: Double) throws -> CMSampleBuffer {
         let count = 1600
         var description = AudioStreamBasicDescription(mSampleRate: 48000, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked, mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
         var format: CMAudioFormatDescription?
         CMAudioFormatDescriptionCreate(allocator: nil, asbd: &description, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format)
         var block: CMBlockBuffer?
         CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: count * 2, blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: count * 2, flags: 0, blockBufferOut: &block)
-        let bytes = [UInt8](repeating: 0, count: count * 2)
-        bytes.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0, dataLength: bytes.count) }
+        let samples: [Int16] = (0..<count).map { index in
+            Int16(sin(2 * Double.pi * frequency * (time.seconds + Double(index) / 48000)) * 8192)
+        }
+        samples.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0, dataLength: $0.count) }
         var buffer: CMSampleBuffer?
         CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!, formatDescription: format!, sampleCount: count, presentationTimeStamp: time, packetDescriptions: nil, sampleBufferOut: &buffer)
         return buffer!
+    }
+
+    static func toneAmplitudes(_ url: URL) async throws -> (system: Double, microphone: Double) {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .audio)
+        guard let track = tracks.first else { throw RecordingFailure.message("Test export has no audio") }
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMIsFloatKey: true, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsNonInterleaved: false])
+        reader.add(output)
+        guard reader.startReading() else { throw reader.error! }
+        var samples: [Float] = []
+        var rate = 48000.0
+        while let buffer = output.copyNextSampleBuffer() {
+            guard let block = CMSampleBufferGetDataBuffer(buffer), let format = CMSampleBufferGetFormatDescription(buffer),
+                  let description = CMAudioFormatDescriptionGetStreamBasicDescription(format) else { continue }
+            rate = description.pointee.mSampleRate
+            let channels = Int(description.pointee.mChannelsPerFrame)
+            let length = CMBlockBufferGetDataLength(block)
+            var values = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+            let status = values.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: $0.baseAddress!) }
+            guard status == kCMBlockBufferNoErr else { throw RecordingFailure.message("Cannot decode test audio") }
+            for index in stride(from: 0, to: values.count, by: channels) { samples.append(values[index]) }
+        }
+        guard reader.status == .completed else { throw reader.error ?? RecordingFailure.message("Audio test decoding failed") }
+        func amplitude(_ frequency: Double) -> Double {
+            var real = 0.0
+            var imaginary = 0.0
+            for (index, sample) in samples.enumerated() {
+                let phase = 2 * Double.pi * frequency * Double(index) / rate
+                real += Double(sample) * cos(phase)
+                imaginary += Double(sample) * sin(phase)
+            }
+            return 2 * hypot(real, imaginary) / Double(samples.count)
+        }
+        return (amplitude(440), amplitude(880))
     }
 
     static func bluePixelCount(_ url: URL, at time: Double = 0.5) async throws -> Int {

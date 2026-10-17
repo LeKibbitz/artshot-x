@@ -5,17 +5,41 @@ extension RecordingController {
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.accessory)
         guard let screen = NSScreen.screens.first else { fatalError("macOS login session required") }
+        let savedLayout = UserDefaults.standard.object(forKey: "recording.cameraLayout")
+        defer {
+            if let savedLayout { UserDefaults.standard.set(savedLayout, forKey: "recording.cameraLayout") }
+            else { UserDefaults.standard.removeObject(forKey: "recording.cameraLayout") }
+        }
         let controller = RecordingController()
         controller.present(on: screen)
         guard let window = controller.optionsWindow, let content = window.contentView else { fatalError("Options window missing") }
         defer { controller.cancel() }
         content.layoutSubtreeIfNeeded()
+        precondition(content.bounds.size == CGSize(width: 470, height: 640), "Options must use the expanded camera controls layout")
         func descendants(_ view: NSView) -> [NSView] { view.subviews.flatMap { [$0] + descendants($0) } }
         for control in descendants(content).filter({ $0 is NSControl && !$0.isHiddenOrHasHiddenAncestor }) {
             let frame = control.convert(control.bounds, to: content)
             precondition(!control.hasAmbiguousLayout && frame.width > 0 && frame.height > 0 && content.bounds.insetBy(dx: -1, dy: -1).contains(frame), "Clipped or ambiguous option: \(control)")
         }
-        precondition(controller.startButton.isEnabled && !controller.shapeControl.isEnabled && !controller.sizeControl.isEnabled)
+        precondition(controller.startButton.isEnabled && !controller.shapeControl.isEnabled && !controller.sizeControl.isEnabled && !controller.zoomControl.isEnabled)
+        precondition(controller.shapeControl.segmentCount == 4 && controller.shapeControl.label(forSegment: 3) == "Ovale vertical")
+        precondition(controller.zoomControl.minValue == 1 && controller.zoomControl.maxValue == 3 && controller.zoomControl.isContinuous)
+        precondition(controller.cameraSource == nil, "Control checks must not open camera hardware")
+        // Exercise the action directly while the camera is off, including persisted preferences.
+        controller.shapeControl.selectedSegment = 3
+        controller.sizeControl.doubleValue = 0.3
+        for zoom in [1.0, 2.5, 3.0] {
+            controller.zoomControl.doubleValue = zoom
+            controller.layoutChanged()
+            precondition(controller.cameraLayout.shape == .verticalOval && controller.cameraLayout.widthFraction == 0.3 && controller.cameraLayout.zoom == zoom)
+            precondition(controller.zoomLabel.stringValue == String(format: "%.1f×", locale: Locale(identifier: "fr_FR"), zoom))
+            let data = UserDefaults.standard.data(forKey: "recording.cameraLayout")!
+            let persisted = try! JSONDecoder().decode(CameraLayout.self, from: data)
+            precondition(persisted == controller.cameraLayout, "Shape and zoom must survive preference serialization")
+            let frame = persisted.frame(in: CGSize(width: 1920, height: 1080))
+            precondition(abs(frame.width / frame.height - 0.75) < 0.000001, "Vertical oval must retain portrait proportions")
+            precondition(controller.cameraSource == nil && !controller.zoomControl.isEnabled)
+        }
         precondition(controller.revealActiveControls() && controller.optionsWindow === window)
         controller.cancel()
         precondition(!controller.isBusy && !controller.revealActiveControls())
@@ -49,7 +73,7 @@ extension RecordingController {
         controller.isFinishing = false
         controller.closeControls()
         precondition(!controller.controls.window.isVisible)
-        print("PASS: options layout, shortcut routing, elapsed labels, pause controls, restart cancellation and cleanup")
+        print("PASS: unclipped 470×640 options, vertical oval, zoom range/action/preferences without hardware, shortcut routing, elapsed labels, pause controls, restart cancellation and cleanup")
     }
 }
 

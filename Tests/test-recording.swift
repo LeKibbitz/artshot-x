@@ -45,6 +45,9 @@ struct RecordingSmokeTest {
                         pixels[p] = 15
                         pixels[p+1] = 240
                         pixels[p+2] = x < 6 ? 15 : 240
+                    } else if blue && (6..<12).contains(y) {
+                        // A horizontal cyan stripe is visible at 1× and cropped out at 2×.
+                        pixels[p+1] = 240
                     }
                 }
             }
@@ -189,21 +192,44 @@ struct RecordingSmokeTest {
         let legacyJSON = try JSONSerialization.data(withJSONObject: ["camera": true, "microphone": false, "systemAudio": false, "cursor": true, "clicks": false, "keys": false])
         let legacyOptions = try JSONDecoder().decode(RecordingOptions.self, from: legacyJSON)
         precondition(legacyOptions.cameraLayout == nil, "Existing metadata must decode without a camera layout")
+        for shape in [CameraShape.circle, .square, .roundedRectangle] {
+            let oldLayout = try JSONSerialization.data(withJSONObject: ["shape": shape.rawValue, "widthFraction": 0.3, "centerX": 0.4, "centerY": 0.6])
+            let decoded = try JSONDecoder().decode(CameraLayout.self, from: oldLayout)
+            precondition(decoded == CameraLayout(shape: shape, widthFraction: 0.3, centerX: 0.4, centerY: 0.6, zoom: 1), "Existing camera layouts must preserve their shape and position and default to 1× zoom")
+        }
+        let oval = CameraLayout(shape: .verticalOval, widthFraction: 0.3, centerX: 0.4, centerY: 0.6)
+        let ovalFrame = oval.frame(in: CGSize(width: 320, height: 240))
+        precondition(abs(ovalFrame.width / ovalFrame.height - 0.75) < 0.000001, "The vertical oval must have a 3:4 frame")
+        let shortFrame = CameraLayout(shape: .verticalOval, widthFraction: 0.45, centerX: 1, centerY: 1).frame(in: CGSize(width: 320, height: 60))
+        precondition(CGRect(x: 0, y: 0, width: 320, height: 60).contains(shortFrame) && abs(shortFrame.width / shortFrame.height - 0.75) < 0.000001, "The vertical oval must fit short screens without distorting")
+        for (zoom, expected) in [(-1.0, 1.0), (0.5, 1), (1, 1), (2, 2), (3, 3), (9, 3), (Double.nan, 1), (Double.infinity, 1), (-Double.infinity, 1)] {
+            var layout = oval
+            layout.zoom = zoom
+            precondition(layout.effectiveZoom == expected, "Zoom must clamp to 1×…3× and use 1× for nonfinite values")
+            precondition(layout.frame(in: CGSize(width: 320, height: 240)) == ovalFrame, "Zoom must preserve the overlay's position and dimensions")
+        }
+        let imageBounds = CGRect(x: 17, y: 23, width: 90, height: 120)
+        var imageLayout = oval
+        let oneImageFrame = imageLayout.imageFrame(sourceSize: CGSize(width: 640, height: 480), in: imageBounds)
+        precondition(oneImageFrame == CGRect(x: -18, y: 23, width: 160, height: 120), "A landscape camera must aspect-fill the vertical oval by cropping its sides")
+        imageLayout.zoom = 2
+        let twoImageFrame = imageLayout.imageFrame(sourceSize: CGSize(width: 640, height: 480), in: imageBounds)
+        precondition(twoImageFrame == CGRect(x: -98, y: -37, width: 320, height: 240), "2× zoom must crop around the center of the existing mask")
         for shape in CameraShape.allCases {
             for fraction in [-1.0, 0.2, 2.0, Double.nan] {
                 let clamped = CameraLayout(shape: shape, widthFraction: fraction, centerX: -2, centerY: 2).frame(in: CGSize(width: 320, height: 240))
                 precondition(CGRect(x: 0, y: 0, width: 320, height: 240).contains(clamped), "Camera layout must stay inside the screen")
                 precondition(clamped.width >= 320 * 0.12 && clamped.width <= 320 * 0.45, "Camera width must be clamped")
             }
-            for (fraction, centerX, centerY) in [(0.16, 0.75, 0.64), (0.36, 0.25, 0.35)] {
-                let layout = CameraLayout(shape: shape, widthFraction: fraction, centerX: centerX, centerY: centerY)
+            for (fraction, centerX, centerY, zoom) in [(0.16, 0.75, 0.64, 1.0), (0.16, 0.75, 0.64, 2.0), (0.36, 0.25, 0.35, 1.0), (0.36, 0.25, 0.35, 2.0)] {
+                let layout = CameraLayout(shape: shape, widthFraction: fraction, centerX: centerX, centerY: centerY, zoom: zoom)
                 var shapedMetadata = metadata
                 shapedMetadata.options.cameraLayout = layout
                 try JSONEncoder().encode(shapedMetadata).write(to: RecordingMetadata.sidecar(for: raw), options: .atomic)
                 precondition(RecordingMetadata.read(raw)?.options.cameraLayout == layout, "Camera layout must persist")
                 var shapeEdit = edit
                 shapeEdit.camera = true
-                let target = folder.appendingPathComponent("shape-\(shape.rawValue)-\(fraction).mp4")
+                let target = folder.appendingPathComponent("shape-\(shape.rawValue)-\(fraction)-\(zoom).mp4")
                 try await RecordingComposition.export(url: raw, edit: shapeEdit, to: target)
                 let generator = AVAssetImageGenerator(asset: AVURLAsset(url: target))
                 generator.requestedTimeToleranceBefore = .zero
@@ -234,7 +260,7 @@ struct RecordingSmokeTest {
             if blockedSidecar { precondition(warning!.contains(interruptedURL.path), "Failed sidecar warning must identify the preserved movie") }
             else { precondition(RecordingMetadata.read(interruptedURL)?.warning != nil, "Stream interruption must be saved as a warning") }
         }
-        print("PASS: delayed screen start/earlier screen end with audio preserved; circle/square/rounded camera masks, aspect fill, fixed layout persistence, matching preview/export pixels, legacy metadata; separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
+        print("PASS: delayed screen start/earlier screen end with audio preserved; circle/square/rounded/vertical oval camera masks, centered 1×/2× zoom, fixed layout persistence, matching preview/export pixels, legacy metadata; separate original tracks; one AAC track with both tones (440 Hz: \(String(format: "%.3f", mixedTones.system)), 880 Hz: \(String(format: "%.3f", mixedTones.microphone))); source toggles; camera timing; effects; atomic MP4; trim; AZERTY; interrupted-stream/sidecar preservation")
     }
 
     static func audioBuffer(time: CMTime, frequency: Double) throws -> CMSampleBuffer {
@@ -260,19 +286,30 @@ struct RecordingSmokeTest {
         }
         let interior = color(CGPoint(x: frame.minX + frame.width * 0.25, y: frame.midY))
         precondition(interior.blueComponent > 0.6 && interior.redComponent < 0.3, "Camera must occupy the configured normalized position")
-        let corner = color(CGPoint(x: frame.minX + frame.width * 0.03, y: frame.minY + frame.height * 0.03))
+        let cornerInset = layout.shape == .square ? 0.03 : 0.01
+        let corner = color(CGPoint(x: frame.minX + frame.width * cornerInset, y: frame.minY + frame.height * cornerInset))
         if layout.shape == .square {
             precondition(corner.blueComponent > 0.6, "Square corners must contain camera pixels")
         } else {
-            precondition(corner.redComponent > 0.6 && corner.blueComponent < 0.3 && corner.greenComponent < 0.3, "Masked corners must retain the screen beneath")
+            precondition(corner.redComponent > 0.6 && corner.blueComponent < 0.3 && corner.greenComponent < 0.3, "Masked corners must retain the screen beneath (\(layout.shape), \(layout.effectiveZoom)×, width \(layout.widthFraction), color \(corner))")
         }
         let left = color(CGPoint(x: frame.minX + frame.width * 0.04, y: frame.midY))
         let right = color(CGPoint(x: frame.minX + frame.width * 0.96, y: frame.midY))
-        if layout.shape == .roundedRectangle {
+        if layout.shape == .roundedRectangle && layout.effectiveZoom == 1 {
             precondition(left.greenComponent > 0.6 && left.redComponent < 0.5 && left.blueComponent < 0.3, "Rounded rectangle must preserve the unmirrored left camera edge")
             precondition(right.greenComponent > 0.6 && right.redComponent > 0.6, "Rounded rectangle must preserve the unmirrored right camera edge")
         } else {
-            precondition(left.blueComponent > 0.6 && right.blueComponent > 0.6, "Square/circle must aspect-fill by cropping source side markers")
+            precondition(left.blueComponent > 0.6 && right.blueComponent > 0.6, "Aspect fill and zoom must crop source side markers")
+        }
+        let stripe = color(CGPoint(x: frame.midX, y: frame.minY + frame.height * 0.18))
+        if layout.effectiveZoom == 1 {
+            precondition(stripe.greenComponent > 0.6 && stripe.blueComponent > 0.6 && stripe.redComponent < 0.5, "1× camera must retain the source stripe at its expected position (\(layout.shape), width \(layout.widthFraction), color \(stripe))")
+        } else {
+            precondition(stripe.blueComponent > 0.6 && stripe.greenComponent < 0.3 && stripe.redComponent < 0.3, "2× camera must crop the source stripe while retaining the centered blue region")
+        }
+        if layout.shape == .verticalOval {
+            let outsideEllipse = color(CGPoint(x: frame.minX + frame.width * 0.1, y: frame.minY + frame.height * 0.15))
+            precondition(outsideEllipse.redComponent > 0.6 && outsideEllipse.blueComponent < 0.3 && outsideEllipse.greenComponent < 0.3, "Vertical oval must leave screen pixels visible outside its elliptical boundary")
         }
         var minX = bitmap.pixelsWide
         var minY = bitmap.pixelsHigh

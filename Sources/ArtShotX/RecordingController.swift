@@ -43,13 +43,15 @@ final class RecordingController: NSObject, NSWindowDelegate {
     private let keysButton = NSButton(checkboxWithTitle: "Afficher les raccourcis et touches spéciales", target: nil, action: nil)
     private var elapsedTimer: Timer?
     private let startButton = NSButton(title: "Démarrer", target: nil, action: nil)
-    private let shapeControl = NSSegmentedControl(labels: ["Rond", "Carré", "Arrondi"], trackingMode: .selectOne, target: nil, action: nil)
+    private let shapeControl = NSSegmentedControl(labels: ["Rond", "Carré", "Arrondi", "Ovale vertical"], trackingMode: .selectOne, target: nil, action: nil)
     private let sizeControl = NSSlider(value: 0.23, minValue: 0.12, maxValue: 0.45, target: nil, action: nil)
     private let sizeLabel = NSTextField(labelWithString: "23 %")
+    private let zoomControl = NSSlider(value: 1, minValue: CameraLayout.zoomRange.lowerBound, maxValue: CameraLayout.zoomRange.upperBound, target: nil, action: nil)
+    private let zoomLabel = NSTextField(labelWithString: "1,0×")
     private let cameraStatus = NSTextField(wrappingLabelWithString: "")
     private var status = "Préparation…"
     private enum Style {
-        static let optionsSize = CGSize(width: 470, height: 590)
+        static let optionsSize = CGSize(width: 470, height: 640)
         static let inset: CGFloat = 24
         static let spacing: CGFloat = 14
         static let sliderWidth: CGFloat = 180
@@ -79,6 +81,12 @@ final class RecordingController: NSObject, NSWindowDelegate {
         sizeControl.isContinuous = true
         sizeControl.widthAnchor.constraint(equalToConstant: Style.sliderWidth).isActive = true
         sizeControl.setAccessibilityLabel("Taille de la vignette caméra")
+        zoomControl.target = self
+        zoomControl.action = #selector(layoutChanged)
+        zoomControl.isContinuous = true
+        zoomControl.widthAnchor.constraint(equalToConstant: Style.sliderWidth).isActive = true
+        zoomControl.setAccessibilityLabel("Zoom de la caméra")
+        zoomControl.toolTip = "Recadrage numérique centré, indépendant de la taille de la vignette"
         shapeControl.setAccessibilityLabel("Forme de la vignette caméra")
         startButton.target = self
         startButton.action = #selector(startPressed)
@@ -127,11 +135,15 @@ final class RecordingController: NSObject, NSWindowDelegate {
         shapeControl.selectedSegment = CameraShape.allCases.firstIndex(of: cameraLayout.shape) ?? 2
         sizeControl.doubleValue = cameraLayout.widthFraction
         sizeLabel.stringValue = "\(Int(sizeControl.doubleValue * 100)) %"
+        zoomControl.doubleValue = cameraLayout.effectiveZoom
+        updateZoomLabel()
         let sizing = NSStackView(views: [NSTextField(labelWithString: "Taille"), sizeControl, sizeLabel])
         sizing.orientation = .horizontal
+        let zooming = NSStackView(views: [NSTextField(labelWithString: "Zoom"), zoomControl, zoomLabel])
+        zooming.orientation = .horizontal
         cameraStatus.font = .systemFont(ofSize: 12)
         cameraStatus.textColor = .secondaryLabelColor
-        let stack = NSStackView(views: [headline, regionButton, cameraButton, shapeControl, sizing, cameraStatus, microphoneButton, systemButton, cursorButton, clicksButton, keysButton, note, buttons])
+        let stack = NSStackView(views: [headline, regionButton, cameraButton, shapeControl, sizing, zooming, cameraStatus, microphoneButton, systemButton, cursorButton, clicksButton, keysButton, note, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Style.spacing
@@ -155,13 +167,19 @@ final class RecordingController: NSObject, NSWindowDelegate {
         guard !isStarting, !isRecording else { return }
         cameraLayout.shape = CameraShape.allCases[max(0, shapeControl.selectedSegment)]
         cameraLayout.widthFraction = sizeControl.doubleValue
+        cameraLayout.zoom = zoomControl.doubleValue
         sizeLabel.stringValue = "\(Int(sizeControl.doubleValue * 100)) %"
+        updateZoomLabel()
         saveCameraLayout()
         showCamera(editable: true)
     }
 
     private func saveCameraLayout() {
         if let data = try? JSONEncoder().encode(cameraLayout) { UserDefaults.standard.set(data, forKey: "recording.cameraLayout") }
+    }
+
+    private func updateZoomLabel() {
+        zoomLabel.stringValue = String(format: "%.1f×", locale: Locale(identifier: "fr_FR"), zoomControl.doubleValue)
     }
 
     private func showCamera(editable: Bool) {
@@ -173,6 +191,7 @@ final class RecordingController: NSObject, NSWindowDelegate {
         let enabled = cameraButton.state == .on
         shapeControl.isEnabled = enabled
         sizeControl.isEnabled = enabled
+        zoomControl.isEnabled = enabled
         stopCamera()
         startButton.isEnabled = !enabled
         cameraStatus.stringValue = enabled ? "Ouverture de la caméra…" : "Activez la caméra pour régler sa vignette avant de démarrer."

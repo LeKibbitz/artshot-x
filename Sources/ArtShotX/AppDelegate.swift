@@ -135,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(file)
         let edit = NSMenuItem(title: "Édition", action: nil, keyEquivalent: "")
         let editMenu = NSMenu(title: "Édition")
-        editMenu.addItem(NSMenuItem(title: "Annuler l’annotation", action: #selector(PreviewWindowController.undo(_:)), keyEquivalent: "z"))
+        editMenu.addItem(NSMenuItem(title: "Annuler", action: #selector(PreviewWindowController.undo(_:)), keyEquivalent: "z"))
         editMenu.addItem(NSMenuItem(title: "Copier", action: #selector(PreviewWindowController.copy(_:)), keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Coller", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Tout sélectionner", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))

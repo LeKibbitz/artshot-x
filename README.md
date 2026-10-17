@@ -2,7 +2,7 @@
 
 A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
-## Version 0.4.0 · build 5
+## Version 0.5.0 · build 6
 
 - Capture the display under your pointer or select a region.
 - Get a floating thumbnail at the bottom left, with **Delete**, **Edit**, **Save** and **Copy** actions. Copy is available for images.
@@ -10,15 +10,15 @@ A local, open-source screenshot and screen recording utility for macOS. Built wi
 - Reopen recent screenshots and recordings across app launches. Originals stay on your Mac.
 - Stitch a vertical scrolling screenshot while you scroll the underlying app manually.
 - Record a display or region, optionally with live camera, system audio, microphone, click indicators and shortcut labels.
-- Preview the camera before recording; choose a circle, square or rounded rectangle, adjust its size and drag it into position. One fixed layout applies to the entire video.
+- Preview the camera before recording; choose a circle, square, rounded rectangle or vertical oval, adjust its size and centered 1×–3× digital zoom, and drag it into position. One fixed layout applies to the entire video.
 - Use a floating recording remote with Stop and a red timer, Pause/Resume, Restart, Trash and a drag handle on the right. Command–Option–Shift–7 brings it back during recording.
-- Edit a recording by toggling captured sources and effects, trimming its start/end and exporting an MP4 with one mixed audio track. The cursor, when enabled, is baked into the screen video.
+- Edit a recording by toggling captured sources and effects, trimming its start/end, removing internal passages with undo, adjusting microphone/system volume independently from 0 to 200%, and exporting an MP4 with one mixed audio track. The cursor, when enabled, is baked into the screen video.
 
 The app runs in the background with a menu bar icon. Launching it does not open a panel or editor. The interface is currently in French. GIF export, OCR and window-specific capture are not included.
 
 ## Build and run
 
-Requires macOS 14 or newer and a Swift 6 toolchain (Xcode or Command Line Tools). There are no third-party dependencies.
+Requires macOS 14 or newer and a Swift 6 toolchain (Xcode or Command Line Tools). There are no third-party runtime dependencies. The optional video-editor UI test uses `ffmpeg` on PATH.
 
 ```sh
 bash scripts/test.sh
@@ -28,6 +28,8 @@ bash scripts/test-library.sh
 bash scripts/test-capture-ui.sh
 bash scripts/test-recording-overlays.sh
 bash scripts/test-recording-controls.sh
+bash scripts/test-recording-edit.sh
+bash scripts/test-video-editor.sh
 bash scripts/build.sh
 open "dist/ArtShot X.app"
 ```
@@ -44,11 +46,13 @@ The shortcuts use physical number-row keys on AZERTY and QWERTY. If a shortcut c
 
 For a region, drag to select, press Return to confirm or Escape to cancel. Selection stays on one display. For a scrolling capture, select the document content, scroll downward in small increments and pause after each increment. Click **Terminer** to assemble the image or **Annuler** to cancel. Uncertain alignment, upward scrolling and fixed footers are rejected. Limits are 20,000 pixels of height, 32 million pixels and 200 captured positions.
 
-Enable the camera in the recording options to see its live preview. Choose its shape and size, then drag it within the selected display or region. The setting is saved as a single layout for the recording; there is no animated camera movement or timeline of layout changes. Its last setup is remembered for the next recording. Camera controls are locked once recording starts.
+Enable the camera in the recording options to see its live preview. Choose its shape, size and zoom, then drag it within the selected display or region. The vertical oval has a 3:4 frame; digital zoom crops the camera image centrally without resizing or moving that frame. The setting is saved as a single layout for the recording; there is no animated camera movement or timeline of layout changes. Its last setup is remembered for the next recording. Camera controls are locked once recording starts.
 
 The timer counts recorded time and stops while paused. Resume continues the same take without keeping the paused interval in the recording. Restart saves the previous take in recent captures and starts a new take from zero with the same display/region, sources and fixed camera layout. The live camera session stays available between takes. Trash ends the current take and moves its recording project to macOS Trash without adding it to history; earlier saved takes are retained.
 
 After recording, choose **Modifier** on the thumbnail to open the video editor. Camera and audio sources are retained as separate tracks in the original MOV; click and shortcut indicators are stored as event metadata. Only special keys and Command shortcuts receive labels; ordinary typed text is not recorded as keyboard events. Screen video still contains whatever is visibly displayed. Sources not selected at recording time cannot be added later.
+
+In the video editor, **Son du Mac** and **Microphone** each have a 0–200% volume slider: 0 mutes, 100% preserves the recorded level, and 200% doubles the signal amplitude. High gains can clip loud recordings. The player and MP4 use the same settings. To remove a passage, move playback to its start and click **Début ici**, then to its end and click **Fin ici**, followed by **Retirer ce passage**. You can also enter times directly, in original-video seconds. Repeat for multiple cuts; **Annuler le retrait** restores the last removal. The retained screen, camera, sound and indicators move together. **Enregistrer MP4…** writes the result without replacing the original.
 
 Recent originals are stored under `~/Library/Application Support/ArtShot X/`. Image annotations and video edit choices are session-local; exported PNGs and MP4s contain the applied edits. The menu offers recent captures and a Finder shortcut to local storage.
 

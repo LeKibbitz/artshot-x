@@ -24,6 +24,12 @@ import AppKit
             NSGraphicsContext.restoreGraphicsState()
             return bitmap
         }
+        func saveSnapshot(_ bitmap: NSBitmapImageRep, name: String) {
+            guard let path = ProcessInfo.processInfo.environment["ARTSHOT_OVERLAY_SNAPSHOT_DIR"] else { return }
+            let directory = URL(fileURLWithPath: path, isDirectory: true)
+            try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent(name))
+        }
         func event(_ type: NSEvent.EventType, screenPoint: CGPoint) -> NSEvent {
             NSEvent.mouseEvent(with: type, location: camera.window.convertPoint(fromScreen: screenPoint),
                                modifierFlags: [], timestamp: 0, windowNumber: camera.window.windowNumber,
@@ -49,6 +55,10 @@ import AppKit
             let layout = CameraLayout(shape: shape, widthFraction: 0.23, centerX: 0.5, centerY: 0.5)
             camera.show(in: capture, layout: layout, editable: true)
             let expected = layout.frame(in: capture.size)
+            if shape == .verticalOval {
+                precondition(abs(expected.width / expected.height - 0.75) < 0.001,
+                             "Vertical camera oval lost its portrait 3:4 proportions")
+            }
             precondition(abs(camera.window.frame.minX - capture.minX - expected.minX) < 1 &&
                          abs(camera.window.frame.minY - capture.maxY + expected.maxY) < 1,
                          "Camera top-left layout was not converted to AppKit screen coordinates")
@@ -69,6 +79,54 @@ import AppKit
                          "Camera shape clipping is missing or cuts the square")
             camera.close()
         }
+
+        // The portrait fixture matches the oval's aspect ratio. Zooming into its green
+        // center must remove both side bands without resizing or moving the window.
+        let zoomContext = CGContext(data: nil, width: 300, height: 400, bitsPerComponent: 8, bytesPerRow: 0,
+                                    space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        for (index, color) in [CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1),
+                               CGColor(srgbRed: 0, green: 1, blue: 0, alpha: 1),
+                               CGColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)].enumerated() {
+            zoomContext.setFillColor(color)
+            zoomContext.fill(CGRect(x: index * 100, y: 0, width: 100, height: 400))
+        }
+        let zoomImage = zoomContext.makeImage()!
+        let oval = CameraLayout(shape: .verticalOval, widthFraction: 0.23, centerX: 0.5, centerY: 0.5)
+        camera.show(in: capture, layout: oval, editable: true)
+        camera.update(image: zoomImage)
+        let unzoomedFrame = camera.window.frame
+        let unzoomed = snapshot(camera.window.contentView!)
+        saveSnapshot(unzoomed, name: "camera-vertical-oval-zoom-1.png")
+        var zoomedOval = oval
+        zoomedOval.zoom = 2
+        camera.show(in: capture, layout: zoomedOval, editable: true)
+        let zoomed = snapshot(camera.window.contentView!)
+        saveSnapshot(zoomed, name: "camera-vertical-oval-zoom-2.png")
+        precondition(camera.window.frame == unzoomedFrame && zoomed.pixelsWide == unzoomed.pixelsWide &&
+                     zoomed.pixelsHigh == unzoomed.pixelsHigh,
+                     "Camera zoom changed the bubble size or placement")
+        for fraction in [0.2, 0.8] {
+            let x = Int(Double(zoomed.pixelsWide) * fraction)
+            let y = zoomed.pixelsHigh / 2
+            let before = unzoomed.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+            let after = zoomed.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+            precondition((fraction < 0.5 ? before.redComponent : before.blueComponent) > 0.9 &&
+                         after.greenComponent > 0.9 && after.redComponent < 0.05 && after.blueComponent < 0.05,
+                         "Camera zoom failed to crop symmetrically into the center of the source")
+        }
+        for bitmap in [unzoomed, zoomed] {
+            let w = bitmap.pixelsWide, h = bitmap.pixelsHigh
+            for point in [(1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2)] {
+                precondition(bitmap.colorAt(x: point.0, y: point.1)!.alphaComponent < 0.05,
+                             "Vertical oval zoom left opaque corners")
+            }
+            precondition(bitmap.colorAt(x: w / 2, y: h / 20)!.alphaComponent > 0.9 &&
+                         bitmap.colorAt(x: w / 20, y: h / 2)!.alphaComponent > 0.9,
+                         "Vertical oval mask cut its vertical or horizontal axis")
+        }
+        camera.close()
+
         let square = CameraLayout(shape: .square, widthFraction: 0.23, centerX: 0.5, centerY: 0.5)
         camera.show(in: capture, layout: square, editable: true)
         camera.update(image: image)
@@ -184,6 +242,6 @@ import AppKit
         bar.close()
         camera.close()
         precondition(!bar.window.isVisible && !camera.window.isVisible, "Recording overlays remain visible after close")
-        print("PASS: camera shapes/clipping; aspect-fill without mirror; placeholder; top-left placement; drag/clamping/locked layout; nonactivation; segmented remote layout; hour timer; Pause/Resume/Restart/Delete/Stop callbacks; keyboard navigation; disabled finalization; close")
+        print("PASS: camera shapes/clipping; portrait oval; centered digital zoom with fixed frame; aspect-fill without mirror; placeholder; top-left placement; drag/clamping/locked layout; nonactivation; segmented remote layout; hour timer; Pause/Resume/Restart/Delete/Stop callbacks; keyboard navigation; disabled finalization; close")
     }
 }

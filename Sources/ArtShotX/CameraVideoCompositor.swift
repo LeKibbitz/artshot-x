@@ -11,17 +11,21 @@ final class CameraCompositionInstruction: NSObject, AVVideoCompositionInstructio
     let screenTimeRanges: [CMTimeRange]
     let cameraTrackID: CMPersistentTrackID?
     let cameraTimeRange: CMTimeRange?
+    let cameraTimeRanges: [CMTimeRange]
     let cameraFrame: CGRect
+    let cameraLayout: CameraLayout
     let renderSize: CGSize
     let mask: CIImage?
 
-    init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, cameraTimeRange: CMTimeRange?, screenTimeRanges: [CMTimeRange], renderSize: CGSize, layout: CameraLayout?) {
+    init(timeRange: CMTimeRange, screenTrackID: CMPersistentTrackID, cameraTrackID: CMPersistentTrackID?, cameraTimeRange: CMTimeRange?, screenTimeRanges: [CMTimeRange], renderSize: CGSize, layout: CameraLayout?, cameraTimeRanges: [CMTimeRange]? = nil) {
         self.timeRange = timeRange
         self.screenTrackID = screenTrackID
         self.screenTimeRanges = screenTimeRanges
         self.cameraTrackID = cameraTrackID
         self.cameraTimeRange = cameraTimeRange
+        self.cameraTimeRanges = cameraTimeRanges ?? cameraTimeRange.map { [$0] } ?? []
         self.renderSize = renderSize
+        cameraLayout = layout ?? CameraLayout()
         requiredSourceTrackIDs = ([screenTrackID] + (cameraTrackID.map { [$0] } ?? [])).map { NSNumber(value: $0) }
         let frame: CGRect
         if let layout {
@@ -45,7 +49,7 @@ final class CameraCompositionInstruction: NSObject, AVVideoCompositionInstructio
         context.scaleBy(x: CGFloat(width) / frame.width, y: CGFloat(height) / frame.height)
         context.setFillColor(CGColor(gray: 1, alpha: 1))
         let local = CGRect(origin: .zero, size: frame.size)
-        if shape == .circle { context.fillEllipse(in: local) }
+        if shape == .circle || shape == .verticalOval { context.fillEllipse(in: local) }
         else {
             let radius = min(frame.width, frame.height) * 0.16
             context.addPath(CGPath(roundedRect: local, cornerWidth: radius, cornerHeight: radius, transform: nil))
@@ -95,13 +99,14 @@ final class CameraVideoCompositor: NSObject, AVVideoCompositing, @unchecked Send
             } else {
                 request.finish(with: RecordingFailure.message("Une image écran attendue est indisponible.")); return
             }
-            if let id = instruction.cameraTrackID, let range = instruction.cameraTimeRange,
-               CMTimeRangeContainsTime(range, time: request.compositionTime), let camera = request.sourceFrame(byTrackID: id) {
+            if let id = instruction.cameraTrackID,
+               instruction.cameraTimeRanges.contains(where: { CMTimeRangeContainsTime($0, time: request.compositionTime) }), let camera = request.sourceFrame(byTrackID: id) {
                 var overlay = CIImage(cvPixelBuffer: camera)
                 let frame = instruction.cameraFrame
-                let scale = max(frame.width / overlay.extent.width, frame.height / overlay.extent.height)
+                let imageFrame = instruction.cameraLayout.imageFrame(sourceSize: overlay.extent.size, in: frame)
+                let scale = imageFrame.width / overlay.extent.width
                 overlay = overlay.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-                overlay = overlay.transformed(by: CGAffineTransform(translationX: frame.midX - overlay.extent.midX, y: frame.midY - overlay.extent.midY)).cropped(to: frame)
+                overlay = overlay.transformed(by: CGAffineTransform(translationX: imageFrame.minX - overlay.extent.minX, y: imageFrame.minY - overlay.extent.minY)).cropped(to: frame)
                 if let mask = instruction.mask {
                     image = overlay.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: image, kCIInputMaskImageKey: mask]).cropped(to: bounds)
                 } else { image = overlay.composited(over: image).cropped(to: bounds) }

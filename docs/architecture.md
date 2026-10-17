@@ -1,4 +1,4 @@
-# ArtShot X 0.4.0 architecture · build 5
+# ArtShot X 0.5.0 architecture · build 6
 
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
@@ -16,8 +16,8 @@ ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creat
 | `LiveCameraSource` | One camera session feeds both the live preview and the original camera video track. |
 | `RecordingTimeline` | Host-clock pause intervals, compressed media/event timestamps and PCM trimming across pause boundaries. |
 | `CameraOverlayController` / `RecordingControlBar` | Nonactivating live camera preview and compact horizontal recording controls. |
-| `CameraLayout` / `CameraVideoCompositor` | Normalized camera placement, circle/square/rounded masks and a shared playback/export renderer. |
-| `RecordingComposition` / `VideoPreviewWindowController` | Source/effect toggles, trimming, preview and MP4 export. |
+| `CameraLayout` / `CameraVideoCompositor` | Normalized camera placement, circle/square/rounded/vertical-oval masks and centered digital zoom and a shared playback/export renderer. |
+| `RecordingComposition` / `VideoPreviewWindowController` | Source/effect toggles, trimming, passage removal, per-source gain, preview and MP4 export. |
 
 ## Images and scrolling
 
@@ -33,9 +33,9 @@ Image previews retain an immutable source and an in-memory annotation list. Numb
 
 ScreenCaptureKit supplies screen frames and optional system audio. AVFoundation supplies optional camera and microphone inputs. A serial recording queue owns frame rendering and media writing. `LiveCameraSource` owns one camera session on a hardware queue, forwards its pixel buffers to the recorder and coalesces preview images to the main actor. Camera authorization occurs only when its option is enabled; starting a camera recording waits for a usable preview frame. The original MOV keeps screen and camera video tracks separate, as well as system and microphone audio tracks. A JSON sidecar stores recording options and timestamped click/shortcut events.
 
-The live camera can be configured before recording as a circle, square or rounded rectangle. Its width is 12–45% of the selected display/region width, constrained to fit; drag placement is clamped inside that area. The normalized center and shape frame use a top-left origin, converted to global AppKit coordinates for the overlay. The preview uses aspect fill without mirroring.
+The live camera can be configured before recording as a circle, square, rounded rectangle or 3:4 vertical oval. Its width is 12–45% of the selected display/region width, constrained to fit; drag placement is clamped inside that area. The normalized center and shape frame use a top-left origin, converted to global AppKit coordinates for the overlay. The preview uses aspect fill without mirroring. A shared geometry function applies a centered 1×–3× digital zoom within the fixed mask; size and position are independent of zoom. Older layout JSON without a zoom value decodes as 1×.
 
-The camera layout is frozen at recording start and saved in the recording metadata. A single shape, size and position applies to the whole video; there are no per-frame transforms or layout keyframes. UserDefaults remembers the last setup for future recordings. The camera window and control bar are excluded from screen capture along with other ArtShot X windows; the independent camera track is composed later. The locked camera overlay lets mouse events pass through to the underlying app.
+The camera layout is frozen at recording start and saved in the recording metadata. A single shape, size, position and zoom applies to the whole video; there are no per-frame transforms or layout keyframes. UserDefaults remembers the last setup for future recordings. The camera window and control bar are excluded from screen capture along with other ArtShot X windows; the independent camera track is composed later. The locked camera overlay lets mouse events pass through to the underlying app.
 
 During recording, Command–Option–Shift–7 reveals a floating horizontal remote rather than the capture panel. It provides Stop with a red recorded-time display, Pause/Resume, Restart, Trash and a drag handle at the right. It can be moved independently without changing the fixed camera layout.
 
@@ -47,7 +47,11 @@ Trash finalizes the current take, moves its app-owned project folder to macOS Tr
 
 Click positions are normalized within the selected capture area. Shortcut labels include special keys and Command shortcuts, using the current keyboard layout; ordinary typed characters are not stored as keyboard events. Enabling these overlays requests Accessibility access. A selected cursor is rendered by ScreenCaptureKit into the screen video and cannot be removed in the editor.
 
-The video editor builds an AVFoundation composition for source toggles and start/end trimming. A custom Core Image video compositor applies the stored camera layout and mask during both playback and export, preserving the same placement and clipping. Recordings from older versions without layout metadata retain their legacy rectangular placement. Native drawing supplies click/shortcut effects during preview; Core Animation supplies those effects during MP4 export. Edits do not rewrite the original tracks. Export writes a temporary file alongside the destination and replaces the destination only after completion; exporting over the original is rejected.
+The video editor builds an AVFoundation composition for source toggles, start/end trimming and internal passage removal. `RecordingEditTimeline` subtracts sorted, merged removals from the retained source range and maps between original and output times. Each retained segment is inserted into screen, camera and audio tracks at the same output offset. Screen/camera media gaps remain explicit; removed events are omitted and surviving event lifetimes end at a splice. The UI uses original seconds for selecting removals and provides session-local undo.
+
+Microphone and system gains are independent, from 0 to 2. AVFoundation's documented per-track gain range is 0 to 1, so amplification above unity uses a second synchronized copy with the fractional remainder, summed by the explicit audio mix. This same mix is attached to AVPlayerItem and MP4 export. Zero gain omits the source. No normalization or limiter is applied; high gain can clip. Export flattens selected sources into one AAC track while the original MOV keeps separate tracks.
+
+ A custom Core Image video compositor applies the stored camera layout and mask during both playback and export, preserving the same placement and clipping. Recordings from older versions without layout metadata retain their legacy rectangular placement. Native drawing supplies click/shortcut effects during preview; Core Animation supplies those effects during MP4 export. Edits do not rewrite the original tracks. Export writes a temporary file alongside the destination and replaces the destination only after completion; exporting over the original is rejected.
 
 ## Local storage and boundaries
 

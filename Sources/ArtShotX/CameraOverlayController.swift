@@ -33,7 +33,7 @@ final class CameraOverlayController {
         self.editable = editable
         window.ignoresMouseEvents = !editable
         cameraView.editable = editable
-        cameraView.shape = layout.shape
+        cameraView.layout = layout
         positionWindow()
         window.orderFrontRegardless()
     }
@@ -86,7 +86,7 @@ private final class CameraOverlayView: NSView {
 
     var onDrag: ((CGSize) -> Void)?
     var image: CGImage? { didSet { needsDisplay = true } }
-    var shape: CameraShape = .roundedRectangle { didSet { needsDisplay = true } }
+    var layout = CameraLayout() { didSet { needsDisplay = true } }
     var editable = false {
         didSet {
             dragAnchor = nil
@@ -108,8 +108,8 @@ private final class CameraOverlayView: NSView {
         context.clear(bounds)
         context.saveGState()
         let path: CGPath
-        switch shape {
-        case .circle: path = CGPath(ellipseIn: bounds, transform: nil)
+        switch layout.shape {
+        case .circle, .verticalOval: path = CGPath(ellipseIn: bounds, transform: nil)
         case .square: path = CGPath(rect: bounds, transform: nil)
         case .roundedRectangle:
             let radius = min(bounds.width, bounds.height) * Style.roundedRadiusFraction
@@ -120,10 +120,7 @@ private final class CameraOverlayView: NSView {
         context.setFillColor(Style.background.cgColor)
         context.fill(bounds)
         if let image {
-            let scale = max(bounds.width / CGFloat(image.width), bounds.height / CGFloat(image.height))
-            let size = CGSize(width: CGFloat(image.width) * scale, height: CGFloat(image.height) * scale)
-            let rect = CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
-                              width: size.width, height: size.height)
+            let rect = layout.imageFrame(sourceSize: CGSize(width: image.width, height: image.height), in: bounds)
             context.interpolationQuality = .high
             context.draw(image, in: rect)
         } else {

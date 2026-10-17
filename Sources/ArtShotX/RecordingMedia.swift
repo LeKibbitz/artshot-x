@@ -18,6 +18,7 @@ struct RecordingEvent: Codable {
     var x: Double?
     var y: Double?
     var label: String?
+    var duration: Double? = nil
 }
 
 struct RecordingMetadata: Codable {
@@ -44,6 +45,74 @@ struct RecordingEdit {
     var keys = true
     var start = 0.0
     var end = Double.greatestFiniteMagnitude
+    var systemAudioVolume = 1.0
+    var microphoneVolume = 1.0
+    var cuts: [RecordingCut] = []
+}
+
+struct RecordingCut: Equatable {
+    var start: Double
+    var end: Double
+}
+
+struct RecordingTimelineSegment {
+    let sourceStart: Double
+    let sourceEnd: Double
+    let outputStart: Double
+    var duration: Double { sourceEnd - sourceStart }
+    var sourceRange: CMTimeRange { CMTimeRange(start: CMTime(seconds: sourceStart, preferredTimescale: 60000), duration: CMTime(seconds: duration, preferredTimescale: 60000)) }
+}
+
+struct RecordingEditTimeline {
+    let segments: [RecordingTimelineSegment]
+    let duration: Double
+    init(duration sourceDuration: Double, edit: RecordingEdit) throws {
+        let start = min(sourceDuration, max(0, edit.start.isFinite ? edit.start : 0))
+        let end = min(sourceDuration, edit.end.isFinite ? edit.end : sourceDuration)
+        guard end > start else { throw RecordingFailure.message("La fin doit suivre le début de la sélection.") }
+        let cuts = edit.cuts.filter { $0.start.isFinite && $0.end.isFinite && $0.end > $0.start }
+            .map { RecordingCut(start: max(start, $0.start), end: min(end, $0.end)) }
+            .filter { $0.end > $0.start }.sorted { $0.start < $1.start }
+        var cursor = start
+        var output = 0.0
+        var kept: [RecordingTimelineSegment] = []
+        for cut in cuts {
+            if cut.start > cursor {
+                kept.append(RecordingTimelineSegment(sourceStart: cursor, sourceEnd: cut.start, outputStart: output))
+                output += cut.start - cursor
+            }
+            cursor = max(cursor, cut.end)
+        }
+        if cursor < end {
+            kept.append(RecordingTimelineSegment(sourceStart: cursor, sourceEnd: end, outputStart: output))
+            output += end - cursor
+        }
+        guard output > 0 else { throw RecordingFailure.message("Conservez au moins un passage de la vidéo.") }
+        segments = kept
+        duration = output
+    }
+    func sourceTime(forOutputTime time: Double) -> Double {
+        let time = max(0, min(duration, time))
+        for segment in segments where time < segment.outputStart + segment.duration {
+            return segment.sourceStart + max(0, time - segment.outputStart)
+        }
+        return segments.last!.sourceEnd
+    }
+    func outputTime(forSourceTime time: Double) -> Double? {
+        for segment in segments where time >= segment.sourceStart && time < segment.sourceEnd {
+            return segment.outputStart + time - segment.sourceStart
+        }
+        if time == segments.last?.sourceEnd { return duration }
+        return nil
+    }
+}
+
+struct RecordingCompositionResult {
+    let composition: AVMutableComposition
+    let videoComposition: AVMutableVideoComposition
+    let audioMix: AVMutableAudioMix
+    let timeline: RecordingEditTimeline
+    let events: [RecordingEvent]
 }
 
 enum RecordingFailure: LocalizedError {
@@ -54,6 +123,11 @@ enum RecordingFailure: LocalizedError {
 enum RecordingComposition {
     /// All captured inputs stay independent until an MP4 is exported.
     static func make(url: URL, edit: RecordingEdit) async throws -> (AVMutableComposition, AVMutableVideoComposition) {
+        let result = try await prepare(url: url, edit: edit)
+        return (result.composition, result.videoComposition)
+    }
+
+    static func prepare(url: URL, edit: RecordingEdit) async throws -> RecordingCompositionResult {
         let asset = AVURLAsset(url: url)
         let videos = try await asset.loadTracks(withMediaType: .video)
         let audioSources = try await asset.loadTracks(withMediaType: .audio)
@@ -61,65 +135,57 @@ enum RecordingComposition {
         for audio in audioSources where try await audio.load(.timeRange).duration > .zero { audios.append(audio) }
         guard let screen = videos.first else { throw RecordingFailure.message("Cette vidéo ne contient aucune image.") }
         let duration = try await asset.load(.duration).seconds
-        let start = max(0, min(edit.start, duration))
-        let end = min(duration, edit.end)
-        guard end > start else { throw RecordingFailure.message("La fin doit suivre le début de la sélection.") }
-        let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), duration: CMTime(seconds: end - start, preferredTimescale: 600))
+        let timeline = try RecordingEditTimeline(duration: duration, edit: edit)
         let composition = AVMutableComposition()
         let screenTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
-        try screenTrack.insertTimeRange(range, of: screen, at: .zero)
+        for segment in timeline.segments { try screenTrack.insertTimeRange(segment.sourceRange, of: screen, at: CMTime(seconds: segment.outputStart, preferredTimescale: 60000)) }
         let size = try await screen.load(.naturalSize)
         let metadata = RecordingMetadata.read(url)
         var cameraTrackID: CMPersistentTrackID?
-        var cameraRange: CMTimeRange?
+        var cameraRanges: [CMTimeRange] = []
         if edit.camera, metadata?.hasCamera == true, videos.count > 1 {
-            let source = videos[1]
-            let sourceRange = try await source.load(.timeRange)
-            let overlap = CMTimeRangeGetIntersection(range, otherRange: sourceRange)
-            if overlap.duration > .zero {
-                let cameraTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
-                let offset = overlap.start - range.start
-                try cameraTrack.insertTimeRange(overlap, of: source, at: offset)
-                cameraTrackID = cameraTrack.trackID
-                cameraRange = CMTimeRange(start: offset, duration: overlap.duration)
-            }
+            let camera = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
+            cameraRanges = try await insertSegments(videos[1], into: camera, timeline: timeline)
+            if !cameraRanges.isEmpty { cameraTrackID = camera.trackID }
         }
-        // Track timeRange can include empty edits before its first frame. Only nonempty
-        // segment mappings describe where the compositor can expect actual screen images.
-        let segments = try await screen.load(.segments)
-        let sourceScreenRanges: [CMTimeRange]
-        if segments.isEmpty { sourceScreenRanges = [try await screen.load(.timeRange)] }
-        else { sourceScreenRanges = segments.filter { !$0.isEmpty }.map { $0.timeMapping.target } }
-        let screenTimeRanges = sourceScreenRanges.compactMap { sourceRange -> CMTimeRange? in
-            let overlap = CMTimeRangeGetIntersection(range, otherRange: sourceRange)
-            guard overlap.duration > .zero else { return nil }
-            return CMTimeRange(start: overlap.start - range.start, duration: overlap.duration)
-        }
-        let instruction = CameraCompositionInstruction(timeRange: CMTimeRange(start: .zero, duration: range.duration), screenTrackID: screenTrack.trackID, cameraTrackID: cameraTrackID, cameraTimeRange: cameraRange, screenTimeRanges: screenTimeRanges, renderSize: size, layout: metadata?.options.cameraLayout)
+        let screenRanges = try await mappedRanges(screen, timeline: timeline)
+        let instruction = CameraCompositionInstruction(timeRange: CMTimeRange(start: .zero, duration: CMTime(seconds: timeline.duration, preferredTimescale: 60000)), screenTrackID: screenTrack.trackID, cameraTrackID: cameraTrackID, cameraTimeRange: nil, screenTimeRanges: screenRanges, renderSize: size, layout: metadata?.options.cameraLayout, cameraTimeRanges: cameraRanges)
+        let audioMix = AVMutableAudioMix()
+        var parameters: [AVAudioMixInputParameters] = []
         var index = 0
         if metadata?.hasSystemAudio == true {
-            if edit.systemAudio, index < audios.count {
-                try await insertAudio(audios[index], into: composition, range: range)
-            }
+            if edit.systemAudio, index < audios.count { parameters += try await insertAudio(audios[index], into: composition, timeline: timeline, volume: edit.systemAudioVolume) }
             index += 1
         }
         if metadata?.hasMicrophone == true {
-            if edit.microphone, index < audios.count { try await insertAudio(audios[index], into: composition, range: range) }
+            if edit.microphone, index < audios.count { parameters += try await insertAudio(audios[index], into: composition, timeline: timeline, volume: edit.microphoneVolume) }
         } else if metadata == nil {
-            for audio in audios { try await insertAudio(audio, into: composition, range: range) }
+            for audio in audios where edit.systemAudio { parameters += try await insertAudio(audio, into: composition, timeline: timeline, volume: edit.systemAudioVolume) }
+        }
+        audioMix.inputParameters = parameters
+        let events = (metadata?.events ?? []).compactMap { event -> RecordingEvent? in
+            let lifetime = event.duration ?? (event.label == nil ? 0.6 : 1.25)
+            guard let segment = timeline.segments.first(where: {
+                (event.time >= $0.sourceStart && event.time < $0.sourceEnd) ||
+                ($0.outputStart == 0 && event.time < $0.sourceStart && event.time + lifetime > $0.sourceStart && event.time >= 0 && !edit.cuts.contains(where: { event.time >= $0.start && event.time < $0.end }))
+            }) else { return nil }
+            var mapped = event
+            mapped.time = segment.outputStart + max(0, event.time - segment.sourceStart)
+            mapped.duration = min(event.time + lifetime, segment.sourceEnd) - max(event.time, segment.sourceStart)
+            return mapped
         }
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = size
         videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
         videoComposition.customVideoCompositorClass = CameraVideoCompositor.self
         videoComposition.instructions = [instruction]
-        if let metadata, (edit.clicks || edit.keys), !metadata.events.isEmpty {
+        if (edit.clicks || edit.keys), !events.isEmpty {
             let parent = CALayer()
             parent.frame = CGRect(origin: .zero, size: size)
             let video = CALayer()
             video.frame = parent.bounds
             parent.addSublayer(video)
-            for event in metadata.events where event.time + (event.label == nil ? 0.6 : 1.25) > start && event.time <= end {
+            for event in events {
                 let layer: CALayer
                 if let x = event.x, let y = event.y, edit.clicks {
                     let ring = CAShapeLayer()
@@ -144,8 +210,8 @@ enum RecordingComposition {
                 let animation = CAKeyframeAnimation(keyPath: "opacity")
                 animation.values = [0, 1, 1, 0]
                 animation.keyTimes = [0, 0.08, 0.75, 1]
-                animation.beginTime = AVCoreAnimationBeginTimeAtZero + event.time - start
-                animation.duration = event.label == nil ? 0.6 : 1.25
+                animation.beginTime = AVCoreAnimationBeginTimeAtZero + event.time
+                animation.duration = event.duration ?? (event.label == nil ? 0.6 : 1.25)
                 animation.isRemovedOnCompletion = false
                 animation.fillMode = .both
                 layer.add(animation, forKey: "visibility")
@@ -153,7 +219,7 @@ enum RecordingComposition {
             }
             videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: video, in: parent)
         }
-        return (composition, videoComposition)
+        return RecordingCompositionResult(composition: composition, videoComposition: videoComposition, audioMix: audioMix, timeline: timeline, events: events)
     }
 
     private static func shortcutImage(_ label: String) -> CGImage? {
@@ -170,12 +236,40 @@ enum RecordingComposition {
         return context.makeImage()
     }
 
-    private static func insertAudio(_ source: AVAssetTrack, into composition: AVMutableComposition, range: CMTimeRange) async throws {
-        guard let target = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { return }
-        // The audio device may have started after the first screen frame.
+    private static func mappedRanges(_ source: AVAssetTrack, timeline: RecordingEditTimeline) async throws -> [CMTimeRange] {
+        let segments = try await source.load(.segments)
+        let ranges = segments.isEmpty ? [try await source.load(.timeRange)] : segments.filter { !$0.isEmpty }.map { $0.timeMapping.target }
+        return timeline.segments.flatMap { kept in ranges.compactMap { range in
+            let overlap = CMTimeRangeGetIntersection(kept.sourceRange, otherRange: range)
+            guard overlap.duration > .zero else { return nil }
+            return CMTimeRange(start: CMTime(seconds: kept.outputStart, preferredTimescale: 60000) + overlap.start - kept.sourceRange.start, duration: overlap.duration)
+        } }
+    }
+
+    private static func insertSegments(_ source: AVAssetTrack, into target: AVMutableCompositionTrack, timeline: RecordingEditTimeline) async throws -> [CMTimeRange] {
         let sourceRange = try await source.load(.timeRange)
-        let overlap = CMTimeRangeGetIntersection(range, otherRange: sourceRange)
-        if overlap.duration > .zero { try target.insertTimeRange(overlap, of: source, at: overlap.start - range.start) }
+        for kept in timeline.segments {
+            let overlap = CMTimeRangeGetIntersection(kept.sourceRange, otherRange: sourceRange)
+            if overlap.duration > .zero { try target.insertTimeRange(overlap, of: source, at: CMTime(seconds: kept.outputStart, preferredTimescale: 60000) + overlap.start - kept.sourceRange.start) }
+        }
+        return try await mappedRanges(source, timeline: timeline)
+    }
+
+    private static func insertAudio(_ source: AVAssetTrack, into composition: AVMutableComposition, timeline: RecordingEditTimeline, volume: Double) async throws -> [AVAudioMixInputParameters] {
+        let gain = volume.isFinite ? min(2, max(0, volume)) : 1
+        // AVAudioMix accepts only 0...1 per track. Identical synchronized tracks
+        // sum linearly, providing genuine amplification through 200%.
+        var remaining = gain
+        var parameters: [AVAudioMixInputParameters] = []
+        while remaining > 0 {
+            let target = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
+            _ = try await insertSegments(source, into: target, timeline: timeline)
+            let input = AVMutableAudioMixInputParameters(track: target)
+            input.setVolume(Float(min(1, remaining)), at: .zero)
+            parameters.append(input)
+            remaining -= min(1, remaining)
+        }
+        return parameters
     }
 
     static func export(url: URL, edit: RecordingEdit, to destination: URL) async throws {
@@ -184,24 +278,14 @@ enum RecordingComposition {
         }
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".artshot-export-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: temporary) }
-        let (composition, videoComposition) = try await make(url: url, edit: edit)
+        let prepared = try await prepare(url: url, edit: edit)
+        let composition = prepared.composition
+        let videoComposition = prepared.videoComposition
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
             throw RecordingFailure.message("Impossible de préparer l’export vidéo.")
         }
         exporter.videoComposition = videoComposition
-        let audioTracks = composition.tracks(withMediaType: .audio)
-        if !audioTracks.isEmpty {
-            // Explicit mixing renders enabled sources into one portable AAC track.
-            // Reserve headroom when the microphone and system audio overlap.
-            let mix = AVMutableAudioMix()
-            let gain: Float = audioTracks.count > 1 ? 0.5 : 1
-            mix.inputParameters = audioTracks.map { track in
-                let parameters = AVMutableAudioMixInputParameters(track: track)
-                parameters.setVolume(gain, at: .zero)
-                return parameters
-            }
-            exporter.audioMix = mix
-        }
+        exporter.audioMix = prepared.audioMix
         exporter.outputFileType = .mp4
         exporter.outputURL = temporary
         exporter.shouldOptimizeForNetworkUse = true

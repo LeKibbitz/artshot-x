@@ -1,4 +1,4 @@
-# Testing ArtShot X 0.6.1 · build 8
+# Testing ArtShot X 0.6.2 · build 9
 
 ## Automated checks
 
@@ -10,6 +10,8 @@ bash scripts/test-library.sh
 bash scripts/test-capture-ui.sh
 bash scripts/test-capture-focus.sh
 bash scripts/test-selection-adjustment.sh
+bash scripts/test-scrolling-preview.sh
+bash scripts/test-scrolling-preview-controller.sh
 bash scripts/test-recording-overlays.sh
 bash scripts/test-recording-controls.sh
 bash scripts/test-recording-edit.sh
@@ -24,6 +26,8 @@ bash scripts/build.sh
 - `test-capture-ui.sh` briefly presents synthetic AppKit content and checks thumbnail placement, layout, nonactivation, action routing, video copy disablement, save feedback and capture-menu states. It does not capture the screen or exercise global keyboard delivery.
 - `test-capture-focus.sh` runs the real capture coordination and transient panels against the currently active app, without activating a separate app or posting global events. It checks the frontmost PID, absence of app activation/Space changes, existing editor preservation, immediate adjustable selection, action enablement after mouse-up, move/resize propagation, Escape cleanup, close-before-callback ordering, scrolling HUD and recording options. It does not capture the screen or open camera hardware.
 - `test-selection-adjustment.sh` checks all eight handles, interior movement, display-edge clamping, negative display origins, invalid rectangles, persistent Return behavior and one-shot capture completion using synthetic AppKit events.
+- `test-scrolling-preview.sh` renders synthetic strips and checks top-to-bottom order, orientation within strips, aspect ratio, resizing, very short/long strips, reset and accessibility dimensions.
+- `test-scrolling-preview-controller.sh` checks accepted-strip updates, unchanged previews for duplicate/rejected positions, HUD layout, nonactivation and cleanup without capturing the desktop.
 - `test-recording-overlays.sh` uses synthetic AppKit images/events to exercise camera shapes and clipping, aspect fill, placeholder drawing, top-left/AppKit positioning, drag/clamp behavior and locked mouse pass-through. It also checks the Stop/Pause/Restart/Trash order, right-hand drag handle, Pause-to-Resume icon/label transition, all four callbacks, disabled finalization controls, an untruncated hour-scale timer, keyboard navigation, nonactivation and preserved placement. It requires a macOS login session and does not open physical camera hardware or record a screen.
 - `test-recording-controls.sh` compiles the actual app controller and checks options layout, shortcut routing between preparation and recording, recorded-time labels, Pause/Resume states, disabled transition/finalization controls, cancellation of automatic restart when quitting, and cleanup without accessing camera hardware.
 - `test-recording-edit.sh` exports low-amplitude synthetic tones and decodes the AAC to measure 50/100/200% gain and independent source mute. It verifies overlapping internal removals, removal-only tone exclusion, source/output mapping, full-removal rejection, camera gaps, clipped event lifetimes and byte-for-byte preservation of the original.
@@ -42,7 +46,7 @@ These checks use synthetic inputs. They do not establish that live screen record
 4. Request a screenshot without screen access. Confirm the permission message and absence of a bogus result. Grant access, relaunch if requested, and capture a display and a region. Check Return, Escape and redraw behavior.
 5. Confirm the thumbnail appears at the bottom left without stealing focus. Exercise edit, PNG save, copy and delete. Relaunch and reopen recent images/videos. Confirm deletion sends the app-owned original to Trash and that externally opened files remain intact.
 6. Test a secondary display to the left/below the primary display, mixed Retina scales, and a display disconnect during selection/capture. Compare exported pixel dimensions and selected regions.
-7. Select a static scrolling document. Scroll downward in small increments with pauses, then finish. Inspect every seam and the last movement. Test no movement, cancellation, a fixed heading, repeated patterns, a large jump, upward motion and a fixed footer; uncertain matches must produce an error or recovery state rather than a corrupt image.
+7. Select a static scrolling document. Confirm that the floating thumbnail shows the first image, then grows in content and reduces its scale to fit the entire result as you scroll downward in small increments with pauses. Move the panel and verify it is excluded from the capture, then finish. Inspect every seam and the last movement. Test no movement, cancellation, a fixed heading, repeated patterns, a large jump, upward motion and a fixed footer; uncertain matches must produce an error or recovery state rather than a corrupt image.
 8. Record a display and a region with optional sources disabled. Stop from both the floating controls and menu. Inspect the thumbnail and original, edit a trim and export an MP4. Test cancellation during startup and recording, and quitting during recording/finalization.
 9. Enable the live camera before starting. Confirm a real image appears, then test circle, square, rounded rectangle and vertical oval, 1×–3× centered zoom, 12–45% size, all four edges and drag clamping within a region. Start recording and verify that camera shape/size/position/zoom stay fixed, clicks reach the app underneath, and the on-screen crop/position matches playback and MP4 export. Move the remote using its right-hand handle and reveal it with shortcut 7 without moving the camera. Check that the last camera setup returns for the next recording.
 10. Enable camera, microphone and system audio individually, then together. Exercise permission refusal, missing/busy devices, rapid camera toggle, cancellation while permission/startup is pending, silence and device disconnection. Check that cancellation/closing options stops the camera and that no old callback affects the next recording. Check speech/visual synchronization and output duration on real hardware; confirm usable screen footage is preserved if an optional source provides no samples.
@@ -112,3 +116,11 @@ Physical shortcut delivery and scrolling a real browser in native fullscreen sti
 Shortcut 7 now opens the selection immediately. Mouse release enables Photo/Scroll/Video without Return, and the rectangle stays editable through eight handles and interior dragging. The focus harness verifies action gating, persistence across another shortcut invocation, propagation of the moved/resized rectangle into video options, full-display routing and Escape cleanup. Frontmost PID and active-Space notifications remain unchanged. The capture UI and recording-controls harnesses also passed. A native AppKit snapshot renders only synthetic content with the actual selection and toolbar views.
 
 The release build and signature verification passed. Version 0.6.1 build 8 was installed, with matching release/installed SHA-256 `d904a39116e1839b3dce2b1beb0b72a303b373ad521f4305c6d7a4ca189c86ac`. Only ArtShot X's previously authorized screen-capture entry was renewed for this binary; macOS shows it enabled and the app was relaunched. This settings check does not establish a new successful ScreenCaptureKit capture. Physical shortcut 7 and live browser scrolling/fullscreen acceptance remain pending.
+
+## 0.6.2 live scrolling preview validation — 2026-10-17
+
+The scrolling HUD now contains an aspect-fit thumbnail of the entire accepted capture. It appears with the first image and updates only when a new strip is accepted. It shares the existing image strips, without rendering another full-resolution bitmap on each sample. Duplicates and rejected positions retain the last valid preview. Completion and cancellation clear its image references. The movable nonactivating HUD stays within the visible display, including its title bar, and remains excluded from capture.
+
+The 16 geometry/stitching tests, preview rendering harness, scrolling controller harness and capture-focus harness passed. Checks cover strip order/orientation, aspect ratio, resizing, very short/long strips, reset, accepted/duplicate/rejected positions, shared strip references, Retina export dimensions and HUD focus/layout. The synthetic snapshot has no desktop content; native button layer rendering is incomplete in that view-cache snapshot. No live browser scrolling success is claimed by these tests.
+
+Version 0.6.2 build 9 was built, signature-verified and installed. Installed/release executable SHA-256 matches: `7d922f793555ba71e2367f1525abfefebe5bd521b602b6cc974a93f6848cc651`. The previously authorized capture-permission entry was renewed only for ArtShot X, enabled in macOS Settings, and the app relaunched. Live scrolling-thumbnail acceptance remains pending.

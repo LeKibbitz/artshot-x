@@ -4,6 +4,14 @@ import ArtShotCore
 /// Captures settled frames while the user scrolls the selected document by hand.
 @MainActor
 final class ScrollingCaptureController {
+    private enum Style {
+        static let panelSize = CGSize(width: 280, height: 410)
+        static let previewHeight: CGFloat = 220
+        static let inset: CGFloat = 16
+        static let gap: CGFloat = 10
+        static let screenMargin: CGFloat = 12
+    }
+
     private enum ScrollError: LocalizedError {
         case invalidImage
         case changedSize
@@ -31,6 +39,7 @@ final class ScrollingCaptureController {
 
     private let captureService = CaptureService()
     private var panel: ScrollCapturePanel?
+    private let previewView = ScrollingPreviewView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "Préparation…")
     private let finishButton = NSButton(title: "Terminer", target: nil, action: nil)
     private var completion: ((Result<NSImage, Error>?) -> Void)?
@@ -70,6 +79,7 @@ final class ScrollingCaptureController {
                 self.lastSeen = initial
                 self.strips = [initial.image]
                 self.totalHeight = initial.image.height
+                self.updatePreview()
                 self.finishButton.isEnabled = true
                 self.updateStatus()
                 while !Task.isCancelled {
@@ -196,6 +206,7 @@ final class ScrollingCaptureController {
             totalHeight = newHeight
             accepted = sample
             hasUnmatchedPosition = false
+            updatePreview()
             if !finishing { updateStatus() }
         }
     }
@@ -224,6 +235,11 @@ final class ScrollingCaptureController {
         statusLabel.stringValue = "\(strips.count) position\(strips.count > 1 ? "s" : "") · \(totalHeight) px de haut. Pause après chaque petit défilement."
     }
 
+    private func updatePreview() {
+        guard let accepted else { previewView.reset(); return }
+        previewView.update(strips: strips, sourceWidth: accepted.image.width, totalHeight: totalHeight)
+    }
+
     private func complete(_ result: Result<NSImage, Error>?) {
         let callback = completion
         completion = nil
@@ -235,6 +251,7 @@ final class ScrollingCaptureController {
         panel?.orderOut(nil)
         panel?.close()
         panel = nil
+        previewView.reset()
         accepted = nil
         lastSeen = nil
         strips = []
@@ -246,19 +263,23 @@ final class ScrollingCaptureController {
     }
 
     private func showPanel(on screen: NSScreen, avoiding region: CGRect) {
-        let size = CGSize(width: 390, height: 148)
-        let visible = screen.visibleFrame.insetBy(dx: 12, dy: 12)
+        let size = Style.panelSize
+        let margin = Style.screenMargin
+        let visible = screen.visibleFrame.insetBy(dx: margin, dy: margin)
         let candidates = [
-            CGRect(x: region.minX, y: region.maxY + 12, width: size.width, height: size.height),
-            CGRect(x: region.minX, y: region.minY - size.height - 12, width: size.width, height: size.height),
-            CGRect(x: region.maxX + 12, y: region.maxY - size.height, width: size.width, height: size.height),
-            CGRect(x: region.minX - size.width - 12, y: region.maxY - size.height, width: size.width, height: size.height)
+            CGRect(x: region.minX - size.width - margin, y: region.maxY - size.height, width: size.width, height: size.height),
+            CGRect(x: region.maxX + margin, y: region.maxY - size.height, width: size.width, height: size.height),
+            CGRect(x: region.minX, y: region.minY - size.height - margin, width: size.width, height: size.height),
+            CGRect(x: region.minX, y: region.maxY + margin, width: size.width, height: size.height)
         ]
-        let fallback = CGRect(x: visible.maxX - size.width, y: visible.maxY - size.height,
+        let fallback = CGRect(x: visible.minX, y: visible.minY,
                               width: size.width, height: size.height)
         let frame = candidates.first(where: { visible.contains($0) && !$0.intersects(region) }) ?? fallback
         let panel = ScrollCapturePanel(contentRect: frame, styleMask: [.titled, .nonactivatingPanel],
                                        backing: .buffered, defer: false)
+        // Include the native title bar when keeping the floating preview on screen.
+        panel.setFrameOrigin(CGPoint(x: max(visible.minX, min(visible.maxX - panel.frame.width, panel.frame.minX)),
+                                     y: max(visible.minY, min(visible.maxY - panel.frame.height, panel.frame.minY))))
         panel.title = "Capture défilante"
         panel.isReleasedWhenClosed = false
         panel.level = .floating
@@ -268,6 +289,8 @@ final class ScrollingCaptureController {
         panel.collectionBehavior = [.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary]
         panel.sharingType = .none
         panel.isMovableByWindowBackground = true
+        panel.appearance = NSAppearance(named: .darkAqua)
+        previewView.reset()
         let instruction = NSTextField(wrappingLabelWithString: "Dans l’app à capturer, défilez lentement vers le bas.")
         instruction.font = .systemFont(ofSize: 13, weight: .medium)
         statusLabel.font = .systemFont(ofSize: 11)
@@ -280,19 +303,21 @@ final class ScrollingCaptureController {
         let cancel = NSButton(title: "Annuler", target: self, action: #selector(cancelFromPanel))
         cancel.bezelStyle = .rounded
         let buttons = NSStackView(views: [cancel, finishButton])
-        buttons.spacing = 10
-        let stack = NSStackView(views: [instruction, statusLabel, buttons])
+        buttons.spacing = Style.gap
+        let stack = NSStackView(views: [previewView, instruction, statusLabel, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
+        stack.spacing = Style.gap
         stack.translatesAutoresizingMaskIntoConstraints = false
         if let content = panel.contentView {
             content.addSubview(stack)
             NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: Style.inset),
+                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -Style.inset),
                 stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
                 stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -12),
+                previewView.widthAnchor.constraint(equalTo: stack.widthAnchor),
+                previewView.heightAnchor.constraint(equalToConstant: Style.previewHeight),
                 instruction.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)
             ])

@@ -1,4 +1,4 @@
-# ArtShot X 0.6.1 architecture · build 8
+# ArtShot X 0.6.2 architecture · build 9
 
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
@@ -10,6 +10,7 @@ ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creat
 | `CapturePanelController` | Compact nonactivating toolbar with target controls and actions enabled only after selection. |
 | `SelectionOverlayController` | Persistent region selection with eight resize handles and interior dragging; one-shot Return capture for shortcut 6. |
 | `ScrollingCaptureController` / `ScrollStitcher` | Settled-frame capture, conservative vertical registration and image assembly. |
+| `ScrollingPreviewView` | Bounded aspect-fit preview of the accepted image strips during capture. |
 | `QuickAccessController` | Bottom-left thumbnail with delete/edit/save/copy actions; image copying only. |
 | `CaptureLibrary` | Atomic local index and persistent screenshot/recording originals. |
 | `AnnotationCanvas` / `PreviewWindowController` | Arrow, rectangle and numbered-step annotations, undo, PNG export and clipboard copying. |
@@ -32,7 +33,7 @@ UI controllers belong to the main actor. The coordinator prevents overlapping ca
 
 Scrolling is manual. A nonactivating HUD leaves input with the underlying app while periodic screenshots wait for stable content. Registration compares grayscale samples at native vertical resolution, ignores duplicate frames and tolerates a fixed heading in the top quarter. It rejects ambiguous overlap, upward movement, oversized movement and detected fixed footers. The user can return to a known position and retry a smaller downward scroll.
 
-The output contains the initial frame followed by newly revealed bottom strips. Each strip is copied into its own bitmap to avoid retaining every full screenshot. Limits are 20,000 output rows, 32 million output pixels and 200 positions. Finishing checks the current viewport again so the final movement is not silently omitted. Cancellation returns no image.
+The output contains the initial frame followed by newly revealed bottom strips. Each strip is copied into its own bitmap to avoid retaining every full screenshot. The floating preview draws those same strips directly into its bounded view, in the same top-to-bottom order as the final export. It updates on the initial image and every accepted addition, without allocating another full-resolution composite. Duplicates and rejected positions preserve the last correct preview; closing the session clears its image references. Limits are 20,000 output rows, 32 million output pixels and 200 positions. Finishing checks the current viewport again so the final movement is not silently omitted. Cancellation returns no image.
 
 Image previews retain an immutable source and an in-memory annotation list. Numbered steps increment on placement; undo reuses the next available number. Export flattens annotations at source pixel resolution. Closing the editor discards its annotation session; the local original remains available.
 

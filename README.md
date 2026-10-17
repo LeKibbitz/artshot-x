@@ -2,14 +2,14 @@
 
 A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
-## Version 0.6.1 · build 8
+## Version 0.6.2 · build 9
 
 - Open an adjustable selection directly over the current app. Draw, move or resize the region with eight handles, then choose **Photo**, **Défilement** or **Vidéo** from the compact floating bar. **Écran** selects the entire display.
 - Capture the display under your pointer or select a region directly with shortcuts 5 and 6.
 - Get a floating thumbnail at the bottom left, with **Delete**, **Edit**, **Save** and **Copy** actions. Copy is available for images.
 - Annotate images with arrows, rectangles and numbered steps; undo annotations, copy the result or save a PNG.
 - Reopen recent screenshots and recordings across app launches. Originals stay on your Mac.
-- Stitch a vertical scrolling screenshot while you scroll the underlying app manually.
+- Stitch a vertical scrolling screenshot while you scroll the underlying app manually. A floating thumbnail shows the entire assembled image and updates as new portions are accepted.
 - Record a display or region, optionally with live camera, system audio, microphone, click indicators and shortcut labels.
 - Preview the camera before recording; choose a circle, square, rounded rectangle or vertical oval, adjust its size and centered 1×–3× digital zoom, and drag it into position. One fixed layout applies to the entire video.
 - Use a floating recording remote with Stop and a red timer, Pause/Resume, Restart, Trash and a drag handle on the right. Command–Option–Shift–7 brings it back during recording.
@@ -29,6 +29,8 @@ bash scripts/test-library.sh
 bash scripts/test-capture-ui.sh
 bash scripts/test-capture-focus.sh
 bash scripts/test-selection-adjustment.sh
+bash scripts/test-scrolling-preview.sh
+bash scripts/test-scrolling-preview-controller.sh
 bash scripts/test-recording-overlays.sh
 bash scripts/test-recording-controls.sh
 bash scripts/test-recording-edit.sh
@@ -49,7 +51,7 @@ The shortcuts use physical number-row keys on AZERTY and QWERTY. If a shortcut c
 
 With shortcut 7, draw a rectangle immediately. Release the mouse to enable the actions; no Return confirmation is needed. Drag inside the selection to move it, or use its eight handles to resize it. The selection stays adjustable until you choose **Photo**, **Défilement** or **Vidéo**; each action uses the latest region. **Écran** selects the entire display without drawing, and **Zone** clears it for a new rectangle. Video opens recording options with the area already selected. The **Plus** menu contains recent media and image-opening commands; the information button shows permissions and shortcut issues. Close or Escape dismisses preparation.
 
-With shortcut 6, drag to select, press Return to capture directly or Escape to cancel. Selection stays on one display. For a scrolling capture, select the document content, scroll downward in small increments and pause after each increment. Click **Terminer** to assemble the image or **Annuler** to cancel. Uncertain alignment, upward scrolling and fixed footers are rejected. Limits are 20,000 pixels of height, 32 million pixels and 200 captured positions.
+With shortcut 6, drag to select, press Return to capture directly or Escape to cancel. Selection stays on one display. For a scrolling capture, select the document content, scroll downward in small increments and pause after each increment. The floating preview appears with the first image, then shrinks to keep the complete growing capture visible. It updates after each accepted scroll position. Drag the panel if it covers content you need. Click **Terminer** to save the assembled capture or **Annuler** to cancel. Uncertain alignment, upward scrolling and fixed footers are rejected. Limits are 20,000 pixels of height, 32 million pixels and 200 captured positions.
 
 Enable the camera in the recording options to see its live preview. Choose its shape, size and zoom, then drag it within the selected display or region. The vertical oval has a 3:4 frame; digital zoom crops the camera image centrally without resizing or moving that frame. The setting is saved as a single layout for the recording; there is no animated camera movement or timeline of layout changes. Its last setup is remembered for the next recording. Camera controls are locked once recording starts.
 

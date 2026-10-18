@@ -1,0 +1,3 @@
+/target/
+/native/macos/artshot-native
+/Cargo.lock

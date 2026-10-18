@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Local ArtShot windows; no remote origins or shell access",
+  "windows": [
+    "main",
+    "selection",
+    "quick",
+    "scrolling",
+    "recording",
+    "camera"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "dialog:allow-open",
+    "dialog:allow-save"
+  ]
+}

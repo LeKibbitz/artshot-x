@@ -1,0 +1,36 @@
+{
+  "name": "desktop",
+  "private": true,
+  "version": "0.7.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "prepare:native": "node scripts/prepare-native.mjs",
+    "build:desktop": "tauri build",
+    "test": "node --experimental-strip-types --test scripts/geometry.test.mjs",
+    "prepare:windows": "node scripts/prepare-windows-cross.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2.5.0",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@tauri-apps/plugin-global-shortcut": "^2.4.1",
+    "@tauri-apps/plugin-opener": "^2.7.2",
+    "lucide-react": "^1.59.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^6.0.2",
+    "ffmpeg-static": "5.2.0",
+    "ffprobe-static": "3.1.0",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16"
+  }
+}

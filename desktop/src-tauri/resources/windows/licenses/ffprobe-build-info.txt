@@ -1,0 +1,7 @@
+ffprobe-static 3.1.0 / FFmpeg 4.0.2 / win32-x64
+SHA-256: 4303ec85855340689b1f8aa5d9c1dc06ef3e3090682de3034edc3fca2b0798d5
+Configuration inspected from PE strings on macOS; Windows runtime not executed.
+--enable-gpl --enable-version3 --enable-sdl2 --enable-bzlib --enable-fontconfig --enable-gnutls --enable-iconv --enable-libass --enable-libbluray --enable-libfreetype --enable-libmp3lame --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenjpeg --enable-libopus --enable-libshine --enable-libsnappy --enable-libsoxr --enable-libtheora --enable-libtwolame --enable-libvpx --enable-libwavpack --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxml2 --enable-libzimg --enable-lzma --enable-zlib --enable-gmp --enable-libvidstab --enable-libvorbis --enable-libvo-amrwbenc --enable-libmysofa --enable-libspeex --enable-libxvid --enable-libaom --enable-libmfx --enable-amf --enable-ffnvcodec --enable-cuvid --enable-d3d11va --enable-nvenc --enable-nvdec --enable-dxva2 --enable-avisynth
+Package source: https://github.com/joshwnj/ffprobe-static
+Corresponding source: https://ffmpeg.org/releases/ffmpeg-4.0.2.tar.xz
+Original binary provider Zeranoe is discontinued. FFprobe executable is GPL, package wrapper license is MIT. Full GPL v3 accompanies FFmpeg in ffmpeg.LICENSE.

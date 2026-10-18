@@ -1,0 +1,10 @@
+ArtShot X: https://github.com/LeKibbitz/artshot-x (MIT).
+Tauri and dependencies retain their own MIT/Apache/BSD licenses.
+
+macOS uses the system ScreenCaptureKit/AVFoundation media frameworks.
+No FFmpeg binary is bundled on macOS.
+
+Windows includes separate FFmpeg and FFprobe executables, not covered by the
+ArtShot X MIT license. Their actual license, build configuration, hashes and
+corresponding source references are in the licenses directory. These GPL builds
+include libx264. See https://ffmpeg.org/legal.html.

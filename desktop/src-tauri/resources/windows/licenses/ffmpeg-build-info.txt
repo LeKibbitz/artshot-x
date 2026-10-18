@@ -1,0 +1,7 @@
+ffmpeg-static 5.2.0 / binary release b6.0 / win32-x64
+Binary: https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-win32-x64.gz
+SHA-256 (decompressed): e9fd5e711debab9d680955fc1e38a2c1160fd280b144476cc3f62bc43ef49db1
+Configuration inspected from PE strings on macOS; Windows runtime not executed.
+--enable-gpl --enable-version3 --enable-static --disable-w32threads --disable-autodetect --enable-fontconfig --enable-iconv --enable-gnutls --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-zlib --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-sdl2 --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxvid --enable-libaom --enable-libopenjpeg --enable-libvpx --enable-mediafoundation --enable-libass --enable-libfreetype --enable-libfribidi --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-ffnvcodec --enable-nvdec --enable-nvenc --enable-d3d11va --enable-dxva2 --enable-libvpl --enable-libgme --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libtheora --enable-libvo-amrwbenc --enable-libgsm --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-librubberband
+Source/build scripts: https://github.com/eugeneware/ffmpeg-static/tree/b6.0
+Corresponding source: https://ffmpeg.org/releases/ffmpeg-6.0.tar.xz

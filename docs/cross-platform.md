@@ -1,100 +1,60 @@
-# macOS and Windows 11 direction
+# Migration partagée · 0.7.0 Preview
 
-Date: 2026-10-18.
+État au 18 octobre 2026. Cibles : macOS 14+ Apple Silicon et Windows 11 x64. Windows 10 et Linux sont hors de ce jalon.
 
-## Product decision and current status
+Le code partagé et les adaptateurs sont implémentés. Les installateurs DMG et EXE sont construits et distribués dans [v0.7.0-preview.1](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.0-preview.1). Aucune validation d’exécution sur Windows physique n’a été réalisée dans cette session. Une compilation et des tests de logique ne prouvent pas le fonctionnement d’un bureau Windows interactif.
 
-ArtShot X targets macOS and Windows 11. Windows 10 is outside the requested scope. The first Windows package will be a preview distributed to external testers; no physical Windows test machine is currently available to this development session.
+## Architecture effectivement utilisée
 
-Version 0.6.2 is still a macOS-only Swift/AppKit application. No Windows executable or installer exists yet. This document records the target architecture and migration sequence, not implemented Windows support.
-
-## Required final deliverables
-
-The finished product must be downloadable and installable by ordinary users. Source code, build scripts or a successful CI build alone do not satisfy delivery.
-
-- **macOS:** a versioned `.dmg` containing ArtShot X, installable into Applications.
-- **Windows 11:** a versioned `.exe` setup installer with an application entry, shortcuts and an uninstall entry.
-- Publish both artifacts on GitHub Releases with the supported OS/CPU architectures, version, checksums and short installation instructions.
-- Installation and normal use must require no terminal, compiler, Rust, Node.js, Xcode or other development tools. The installer must handle required runtime dependencies.
-- Verify download, installation, first launch, permission onboarding, the supported capture/edit/export flows, upgrade from the previous preview and removal of the application on each target OS. Upgrades must preserve local captures and settings.
-- Validate the distributed packages, not only development builds. Record signing/notarization status accurately; establish release signing identities before claiming a signed public distribution.
-
-Early previews may contain a clearly stated subset of features. They do not count as the finished product until the agreed capture, scrolling, recording and editing scope has passed acceptance on both systems. Windows hardware acceptance will use external testers as agreed.
-
-## Target architecture
-
-| Area | Choice | Reason |
-| --- | --- | --- |
-| Shared domain and image processing | Rust | Share capture/project models, geometry, scrolling alignment, annotation operations and edit decisions across systems. |
-| Shared editor, library and settings | TypeScript/React with Tauri 2 | Share the ordinary application interface while calling local Rust commands. |
-| macOS capture and transient overlays | ScreenCaptureKit, AVFoundation and AppKit, retaining a Swift adapter where useful | Preserve integration with screen permissions, system audio, camera, Spaces and nonactivating windows. |
-| Windows capture and transient overlays | Windows Graphics Capture and Win32 through Microsoft's Rust bindings | Use native display/window capture, global shortcuts, DPI information and capture-window exclusion. |
-| Windows audio | WASAPI loopback for system output, separate microphone capture | Keep microphone and system sound separately editable. |
-| Storage | Local files and a versioned project manifest | Preserve originals, require no account and keep media on the user's computer. |
-| Packaging | Platform-specific macOS bundle and Windows installer | Compile and test each system's actual backend. |
-
-The editor can be shared; the selection overlay, recording remote and camera overlay must prove their behavior on each operating system. Tauri does not itself provide screen recording, scroll stitching, synchronized audio or a guarantee of nonactivation over fullscreen apps.
-
-Capture frames remain in native buffers/files. Do not send live video frames as JSON or base64 through the web interface. Commands carry intent, identifiers and metadata; the interface accesses only authorized local preview resources. The capture layer must exclude ArtShot windows independently of whether those windows are implemented natively or with a webview.
-
-Rust does not remove OS permissions or automatically port Apple media APIs. Windows rendering and MP4 export require their own media implementation or a separately validated shared media engine. That implementation choice must be established with real multi-source recordings before promising video parity.
-
-## Existing work to preserve
-
-- Keep the installed Swift application and its capture/recording flows working during migration.
-- Port and compare `ScrollStitcher` against the existing synthetic test vectors.
-- Normalize coordinate origins, display IDs and physical pixels explicitly; do not copy AppKit's global bottom-left convention into Windows.
-- Separate the timing/cut/layout mathematics from `CMSampleBuffer`, `CGImage` and other Apple objects before sharing it.
-- Treat current camera layouts, passage removals, source volumes and originals as compatibility requirements. Never rewrite existing recording projects during an experiment.
-- Keep existing Swift UI tests as behavior references for handles, focus, thumbnail actions and recording controls.
-
-## Delivery order and acceptance gates
-
-### 1. Prove native capture on both systems
-
-Create a separate development app identity so it cannot replace the installed Mac app or reset its permissions. Establish Rust/Tauri build prerequisites and a Windows CI build. Validate display enumeration, physical pixel dimensions, multi-monitor origins, exclusion of the app's own windows and capture error reporting on both systems.
-
-### 2. First Windows preview: screenshot to annotated PNG
-
-Complete one useful flow before adding recording:
-
-1. Launch silently in the tray/menu bar and invoke a global capture command (S01).
-2. Select and adjust a region without switching the source application (S03/S04), or capture the whole display.
-3. Show a floating result with Delete, Edit, Save and Copy (S06/S09).
-4. Open the shared image editor with arrow, rectangle and numbered steps, plus undo (S07).
-5. Save/copy a correctly sized PNG and reopen the original from the local library (S11).
-
-Windows shortcut mappings must be checked for conflicts, keyboard layout and accessibility. Do not assume replacing Command with the Windows key will work for every combination. The preview must name its supported commands and report registration failures.
-
-Generate a Windows installer only after the Windows build and automated tests pass. Label the first package as a preview with explicit supported functions. An external tester must then verify installation, capture, focus, clipboard, PNG saving and reopening on a physical Windows 11 session. CI cannot establish interactive desktop capture, GPU, camera or audio behavior.
-
-### 3. Scrolling capture
-
-Reuse the common alignment engine and add native frame acquisition. Verify the complete-image thumbnail, accepted/rejected positions, finish/cancel behavior and PNG seams on real scrolling documents (S12). Retain conservative rejection of unreliable alignments.
-
-### 4. Recording and editing parity
-
-Add display/region video first, then independent system/microphone audio, camera with shape/size/centered zoom, cursor/click/shortcut effects, pause/resume and the floating remote (S14). Validate a common recording-project contract and the media backend before adding source toggles, gain, passage removal, undo and MP4 export. Screen, camera, audio and event metadata must remain synchronized across pauses and cuts.
-
-Linux is not part of this requested milestone. The shared design must not imply that its screen capture backend already exists.
-
-## Tests and release evidence
-
-| Layer | Evidence required |
+| Couche | Implémentation |
 | --- | --- |
-| Shared Rust code | Unit/property or fixture tests on macOS and Windows, including malformed inputs and parity with existing algorithms. |
-| Shared interface | Interaction tests for annotations, undo, selection state, error states and local file workflows. |
-| Windows build | Native compilation, tests and installer generation on a Windows CI runner. |
-| Real Windows behavior | External tester results for Windows version, display/DPI setup, hardware, foreground app and enabled capture sources. |
-| macOS regression | Existing capture, focus, recording and export checks before switching any installed functionality to the new stack. |
+| Domaine et traitement partagé | `crates/artshot-core` : géométrie en pixels physiques avec origine en haut à gauche, modèles serde, annotations, alignement vertical, cadrage caméra et calcul des coupes/pauses. |
+| Interface, bibliothèque, réglages | `desktop/` : React/TypeScript et Tauri 2 ; commandes Rust locales. |
+| macOS | Adaptateur Swift livré avec la preview : ScreenCaptureKit, AVFoundation et AppKit pour capture, pistes indépendantes, caméra et export MP4. Panneaux natifs et intégration Tauri pour les fenêtres transitoires. |
+| Windows — images | Capture native via `xcap`, coordonnées physiques et validation des zones. |
+| Windows — vidéo/caméra | FFmpeg embarqué : GDI `gdigrab` pour l’écran, DirectShow pour la caméra ; segments séparés pendant les pauses et assemblage avant export. **Cette preview n’utilise pas Windows Graphics Capture pour enregistrer la vidéo.** |
+| Windows — audio | WASAPI natif : loopback du périphérique de sortie par défaut et microphone par défaut, dans deux WAV indépendants. Aucun périphérique Stereo Mix ou pilote virtuel requis. |
+| Stockage | Fichiers locaux, index de bibliothèque, manifestes de projet et originaux séparés des exports. Identité preview `org.artshotx.desktop`. |
+| Distribution | DMG macOS et EXE NSIS Windows ; dépendances d’exécution incluses ou prises en charge par l’installateur. |
 
-The principal risks are mixed display scaling/negative coordinates, preserving foreground focus and fullscreen context, and synchronized video/audio capture plus export. A successful build alone does not close any of those hardware acceptance gates.
+Les images et vidéos de capture restent dans des fichiers ou buffers natifs. Le flux vidéo n’est pas transporté en JSON. Les aperçus locaux utilisent le protocole d’assets de l’application ; l’éditeur peut transmettre un PNG annoté pour la copie ou l’export.
 
-## Primary references
+Le code Swift historique dans `Sources/` et ses scripts de test sont conservés. La preview ne remplace pas l’application installée et n’importe pas automatiquement sa bibliothèque. Voir le [guide historique](legacy-swift.md).
 
-- [Tauri architecture and platform support](https://v2.tauri.app/start/)
-- [Artcraft development stack: Rust/Tauri and React/TypeScript](https://github.com/storytold/artcraft/blob/main/_docs/dev_setup.md)
-- [Microsoft Windows screen capture](https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture)
-- [Microsoft Rust bindings for Windows APIs](https://github.com/microsoft/windows-rs)
-- [Window exclusion from capture](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity)
-- [WASAPI loopback recording](https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording)
+## Fonctions présentes
+
+La preview implémente la sélection ajustable, les captures plein écran/zone, les miniatures, la bibliothèque, les annotations PNG avec annulation et le défilement vertical. L’alignement partagé conserve les fixtures Swift : déplacements descendants, en-tête fixe, texte clairsemé et rejet des pieds de page fixes, mouvements inverses ou motifs ambigus.
+
+Les adaptateurs implémentent vidéo d’écran/zone, caméra avec forme/position/zoom, microphone, audio système, pause/reprise et événements de clics/raccourcis. L’éditeur propose retrait de passages, activation des sources/effets disponibles, gains indépendants, aperçu de montage et MP4. Une source absente à la capture ne peut pas être ajoutée ensuite. Les annotations et choix de montage de l’éditeur restent locaux à la session ; les exports contiennent les modifications appliquées.
+
+Les exports protègent les originaux, aperçus et pistes audio de la bibliothèque, y compris les alias symboliques et liens physiques. Le résultat est produit dans un fichier temporaire voisin puis remplacé après réussite. Un échec d’export conserve le fichier de destination précédent. Les projets vidéo conservent des manifestes de récupération avant l’assemblage et la création de l’aperçu.
+
+## Discipline temporelle Windows
+
+Les WAV utilisent les horodatages QPC de WASAPI. Une même observation de progression FFmpeg ancre les deux pistes audio dans la timeline vidéo. Le temps des images déjà encodées est conservé au début de chaque segment ; après fermeture du segment, sa durée mesurée recale les WAV par silence ou troncature. La reprise utilise cette durée cumulée. Les callbacks audio tardifs sont filtrés selon les intervalles historiques.
+
+Des tests CPU couvrent ces transformations, le démarrage retardé, plusieurs reprises et la réouverture des WAV tronqués. Ils ne mesurent pas la latence du matériel, de l’encodeur ou du canal de progression FFmpeg. La précision audiovisuelle finale et la synchronisation caméra/écran restent à mesurer sur Windows réel, avant et après plusieurs pauses et coupes.
+
+## Preuves disponibles et limites
+
+Exécution locale : `cargo test --workspace` — 21 tests réussis (cœur 10, desktop 8, plateforme 3) ; helpers frontend — 4 tests réussis. Ces résultats concernent l’hôte macOS.
+
+| Vérification | État |
+| --- | --- |
+| Cœur Rust et helpers TypeScript | Tests locaux exécutés : géométrie, annotations, fixtures de défilement, coupes et conservation des dimensions. |
+| Backend/export | Tests locaux exécutés : réglages avant démarrage, échec de sauvegarde du défilement, JSON atomique, protection des originaux/alias et conservation d’un export existant en cas d’échec. |
+| Audio Windows | Compilation Windows et Clippy effectués ; algorithmes CPU extraits sans modification et testés sur l’hôte macOS. Les appels WASAPI n’ont pas été exécutés sur Windows. |
+| Adaptateur macOS | Essais de capture PNG et d’enregistrement avec pause/reprise puis export MP4 pendant le développement. Ils ne constituent pas une validation du DMG final. |
+| Paquets | DMG vérifié, monté, installé puis lancé sur Mac Apple Silicon. EXE NSIS x64 construit depuis les sources finales ; architecture, dépendances et garde Windows 11 inspectées. Installation Windows, mises à niveau et désinstallation restent à vérifier. |
+| CI GitHub | Workflow préparé dans [docs/ci/desktop-preview.yml](ci/desktop-preview.yml), mais non activé dans `.github/workflows` : les identifiants disponibles n’autorisent pas sa publication. Aucun succès de CI Windows n’est revendiqué. |
+
+## Acceptation restante
+
+- Télécharger, installer, lancer et désinstaller les paquets finaux ; vérifier une mise à niveau sans perte de captures ni réglages.
+- Vérifier les autorisations écran/caméra/microphone, l’accessibilité pour les événements, les erreurs et les raccourcis sur les claviers utilisés.
+- Mesurer le maintien du focus et du contexte plein écran, les fenêtres non activantes et leur exclusion des captures.
+- Tester plusieurs écrans, origines négatives, DPI différents, sélection et dimensions physiques exportées.
+- Tester le défilement réel et ses coutures, la caméra, les deux sources audio, plusieurs pauses/reprises et les coupes après export.
+- Faire réaliser ces essais Windows 11 par des testeurs externes et consigner système, matériel, écrans et sources activées.
+
+La livraison finale exige des installateurs téléchargeables, utilisables sans outils de développement, leurs empreintes et des résultats d’acceptation sur les deux systèmes. La signature macOS est ad-hoc, sans notarisation ; le paquet Windows est non signé. Ces statuts doivent rester visibles dans les notes de release.

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>LSUIElement</key><true/>
+<key>NSScreenCaptureUsageDescription</key><string>ArtShot X capture l’écran ou la zone choisie pour enregistrer vos images et vidéos localement.</string>
+<key>NSCameraUsageDescription</key><string>La caméra s’active uniquement lorsque vous choisissez son incrustation dans une vidéo.</string>
+<key>NSMicrophoneUsageDescription</key><string>Le microphone s’active uniquement lorsque vous choisissez de l’enregistrer.</string>
+</dict></plist>

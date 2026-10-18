@@ -8,3 +8,11 @@ replica/
 .env
 .env.*
 !.env.example
+target/
+node_modules/
+desktop/src-tauri/resources/bin/
+crates/artshot-platform/native/macos/artshot-native
+desktop/src-tauri/gen/
+*.log
+desktop/src-tauri/resources/windows/bin/
+.xwin-cache/

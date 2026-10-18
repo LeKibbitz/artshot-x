@@ -1,0 +1,12 @@
+{
+  "build": { "beforeBuildCommand": "npm run build" },
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "resources/bin/": null,
+      "resources/licenses/": null,
+      "resources/windows/bin/": "bin/",
+      "resources/windows/licenses/": "licenses/"
+    }
+  }
+}

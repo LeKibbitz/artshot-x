@@ -2,6 +2,8 @@
 
 A local, open-source screenshot and screen recording utility for macOS. Built with Swift, AppKit and ScreenCaptureKit.
 
+The product now targets **macOS and Windows 11**. The current release is macOS-only; Windows support and its first external-test installer are planned through a shared Rust core, Tauri editor and native capture backends. See the [cross-platform migration plan](docs/cross-platform.md). No Windows download is available yet.
+
 ## Version 0.6.2 · build 9
 
 - Open an adjustable selection directly over the current app. Draw, move or resize the region with eight handles, then choose **Photo**, **Défilement** or **Vidéo** from the compact floating bar. **Écran** selects the entire display.

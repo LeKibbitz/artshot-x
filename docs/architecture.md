@@ -1,5 +1,7 @@
 # ArtShot X 0.6.2 architecture · build 9
 
+This document describes the implemented macOS application. The accepted macOS + Windows 11 target and proposed migration are recorded in [cross-platform direction](cross-platform.md); that target architecture is not yet implemented.
+
 ArtShot X is an AppKit menu bar app with explicit capture actions. Startup creates its controllers and status item without displaying a window. Screenshots finish in a nonactivating thumbnail; opening an editor is a separate action.
 
 | Component | Responsibility |

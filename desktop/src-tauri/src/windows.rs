@@ -110,17 +110,27 @@ pub fn show(app: &AppHandle, label: &str) {
     #[cfg(target_os = "macos")]
     {
         let label = label.to_owned();
-        let _ = on_main(app, move |app| {
+        let result = on_main(app, move |app| {
             if let Ok(panel) = app.get_webview_panel(&label) {
-                panel.show();
                 if label == "selection" {
-                    panel.make_key_window();
+                    // Give the webview a first responder as well as a key panel,
+                    // without activating ArtShot or switching the current Space.
+                    panel.show_and_make_key();
+                } else {
+                    panel.show();
                 }
+                crate::diagnostics::record(
+                    app,
+                    &format!("show {label} visible={}", panel.is_visible()),
+                );
             } else if let Some(window) = app.get_webview_window(&label) {
                 window.show().map_err(|error| error.to_string())?;
             }
             Ok(())
         });
+        if let Err(error) = result {
+            crate::diagnostics::record(app, &format!("show failed: {error}"));
+        }
     }
     #[cfg(target_os = "windows")]
     if let Some(window) = app.get_webview_window(label) {
@@ -146,7 +156,12 @@ pub fn hide(app: &AppHandle, label: &str) {
         let label = label.to_owned();
         let _ = on_main(app, move |app| {
             if let Ok(panel) = app.get_webview_panel(&label) {
+                panel.resign_key_window();
                 panel.hide();
+                crate::diagnostics::record(
+                    app,
+                    &format!("hide {label} visible={}", panel.is_visible()),
+                );
             } else if let Some(window) = app.get_webview_window(&label) {
                 window.hide().map_err(|error| error.to_string())?;
             }
@@ -193,6 +208,9 @@ pub fn selection(app: &AppHandle, d: &Display) -> Result<(), String> {
     w.set_position(PhysicalPosition::new(d.x, d.y))
         .map_err(|e| e.to_string())?;
     show(app, "selection");
+    if !w.is_visible().map_err(|e| e.to_string())? {
+        return Err("La fenêtre de sélection n’a pas pu être affichée".into());
+    }
     Ok(())
 }
 pub fn floating(
@@ -218,6 +236,9 @@ pub fn floating(
     ))
     .map_err(|e| e.to_string())?;
     show(app, label);
+    if !w.is_visible().map_err(|e| e.to_string())? {
+        return Err(format!("La fenêtre {label} n’a pas pu être affichée"));
+    }
     Ok(())
 }
 pub fn main(app: &AppHandle) {

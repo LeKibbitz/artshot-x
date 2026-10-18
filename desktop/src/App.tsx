@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+import { Camera as PhotoIcon, ScanLine, Video, X, Trash2, Pencil, Save, Copy, Monitor, SquareDashed } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -48,20 +49,25 @@ export default function App() {
     }
   }
   useEffect(() => {
+    let cancelled = false;
     let dispose: (() => void) | undefined;
-    api<AppState>("get_state")
-      .then((s) => {
-        setState(s);
-        setLoaded(true);
-      })
-      .catch((e) => setError(String(e)));
+    let receivedEvent = false;
+    // Subscribe before fetching: an event arriving during the fetch wins.
     listen<AppState>("app-state", (e) => {
+      if (cancelled) return;
+      receivedEvent = true;
       setState(e.payload);
       setLoaded(true);
-    })
-      .then((fn) => (dispose = fn))
-      .catch((e) => setError(String(e)));
-    return () => dispose?.();
+    }).then(async (fn) => {
+      if (cancelled) { fn(); return; }
+      dispose = fn;
+      const snapshot = await api<AppState>("get_state");
+      if (!cancelled && !receivedEvent) {
+        setState(snapshot);
+        setLoaded(true);
+      }
+    }).catch((e) => { if (!cancelled) setError(String(e)); });
+    return () => { cancelled = true; dispose?.(); };
   }, []);
   useEffect(() => {
     if (state.editingId || state.activeItemId)
@@ -71,6 +77,7 @@ export default function App() {
         ) ?? null,
       );
   }, [state.editingId, state.activeItemId, state.library]);
+  useEffect(() => { setError(""); }, [state.selectionDisplay?.backgroundPath]);
   const latest =
     state.library.find((i) => i.id === state.activeItemId) ?? state.library[0];
   const banner = (error || state.error) && (
@@ -129,8 +136,10 @@ export default function App() {
         <header>
           <span className="red-dot" /> Capture défilante
           <Button onClick={() => run("finish_scroll")}>Terminer</Button>
+          <Button title="Annuler la capture défilante" onClick={() => run("close_overlay")}>Annuler</Button>
         </header>
         <p>Faites défiler lentement la fenêtre capturée.</p>
+        <p role="status">{state.scrolling?.acceptedFrames ?? 0} images assemblées · {state.scrolling?.status || "En attente"}</p>
         {(state.scrolling?.previewPath ?? state.previewPath) ? (
           <img
             src={mediaUrl((state.scrolling?.previewPath ?? state.previewPath)!)}
@@ -143,23 +152,23 @@ export default function App() {
     );
   if (label === "quick")
     return (
-      <div className="quick">
+      <div className={`quick${banner ? " quick-error" : ""}`}>
         {banner}
-        {latest && (
+        {latest && !banner && (
           <>
             {latest.kind === "video" ? <video src={mediaUrl(latest.path)} muted preload="metadata" /> : <img src={mediaUrl(latest.path)} alt={latest.name} />}
             <div className="toolbar">
               <Button onClick={() => run("delete_item", { id: latest.id })}>
-                ⌫
+                <Trash2 aria-hidden="true" />Supprimer
               </Button>
               <Button onClick={() => run("open_editor", { id: latest.id })}>
-                Modifier
+                <Pencil aria-hidden="true" />Modifier
               </Button>
               <Button onClick={() => run("save_item", { id: latest.id })}>
-                Enregistrer
+                <Save aria-hidden="true" />Enregistrer
               </Button>
               <Button disabled={latest.kind !== "image"} onClick={() => run("copy_image", { id: latest.id })}>
-                Copier
+                <Copy aria-hidden="true" />Copier
               </Button>
             </div>
           </>
@@ -348,6 +357,24 @@ function Selection({
     initial ? cssRect(initial) : null,
   );
   const [options, setOptions] = useState(false);
+  const rectRef = useRef(rect);
+  rectRef.current = rect;
+  const [capturing, setCapturing] = useState(false);
+  const capturePending = useRef(false);
+  const [captureError, setCaptureError] = useState("");
+  async function capture(command: string, args: Record<string, unknown> = {}) {
+    const current = rectRef.current;
+    if (!current || current.width < 2 || current.height < 2 || capturePending.current) return;
+    capturePending.current = true;
+    setCapturing(true);
+    setCaptureError("");
+    try {
+      await api("set_selection", { rect: { x: current.x * scale, y: current.y * scale, width: current.width * scale, height: current.height * scale } });
+      await run(command, args);
+    } catch (error) {
+      setCaptureError(String(error));
+    } finally { capturePending.current = false; setCapturing(false); }
+  }
   const [mic, setMic] = useState(true),
     [system, setSystem] = useState(true),
     [camera, setCamera] = useState(false),
@@ -380,12 +407,15 @@ function Selection({
   }, [state.settings]);
   useEffect(() => {
     setRect(initial ? cssRect(initial) : null);
-  }, [initial?.x, initial?.y, initial?.width, initial?.height, scale]);
+    setOptions(false);
+    setCaptureError("");
+    gesture.current = null;
+  }, [state.selectionDisplay?.backgroundPath, state.selectionDisplay?.id, scale]);
   useEffect(() => {
     const f = (e: KeyboardEvent) => {
       if (e.key === "Escape") run("close_overlay");
       if (e.key === "Enter" && rect && rect.width > 1 && rect.height > 1)
-        run("capture_photo");
+        capture("capture_photo");
     };
     window.addEventListener("keydown", f);
     return () => window.removeEventListener("keydown", f);
@@ -416,6 +446,7 @@ function Selection({
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     gesture.current = { start: { x: e.clientX, y: e.clientY }, rect, handle };
+    if (handle === "new") { rectRef.current = null; setRect(null); setOptions(false); }
   }
   function move(e: ReactPointerEvent) {
     const g = gesture.current;
@@ -459,8 +490,9 @@ function Selection({
     }
   }
   function up() {
+    if (!gesture.current) return;
     gesture.current = null;
-    if (rect)
+    if (rect && rect.width >= 2 && rect.height >= 2)
       run("set_selection", {
         rect: {
           x: rect.x * scale,
@@ -484,7 +516,9 @@ function Selection({
       onPointerDown={(e) => down(e)}
       onPointerMove={move}
       onPointerUp={up}
+      onPointerCancel={() => { gesture.current = null; }}
     >
+      {captureError && <div className="error" role="alert">{captureError}</div>}
       {!rect && (
         <div className="selection-hint">
           Glissez pour sélectionner une zone · Échap pour fermer
@@ -517,18 +551,20 @@ function Selection({
               }}
             />
           ))}
+        </div>
+      )}
           <div
             className="selection-toolbar"
             style={{
               position: "fixed",
               left: Math.min(
-                Math.max(rect.x + rect.width / 2, 270),
-                window.innerWidth - 270,
+                Math.max(rect ? rect.x + rect.width / 2 : window.innerWidth / 2, Math.min(250, window.innerWidth / 2)),
+                window.innerWidth - Math.min(250, window.innerWidth / 2),
               ),
               top: Math.max(
                 16,
                 Math.min(
-                  rect.y + rect.height + 14,
+                  rect ? rect.y + rect.height + 14 : window.innerHeight - 70,
                   window.innerHeight - (options ? 450 : 76),
                 ),
               ),
@@ -555,7 +591,7 @@ function Selection({
                   });
                 }}
               >
-                Écran
+                <Monitor aria-hidden="true" />Écran
               </Button>
               <Button
                 onClick={() => {
@@ -563,17 +599,17 @@ function Selection({
                   run("begin_selection");
                 }}
               >
-                Zone
+                <SquareDashed aria-hidden="true" />Zone
               </Button>
-              <Button onClick={() => run("capture_photo")}>▧ Photo</Button>
-              <Button onClick={() => run("start_scroll")}>↕ Défilement</Button>
+              <Button disabled={capturing || !rect || rect.width < 2 || rect.height < 2} onClick={() => capture("capture_photo")}><PhotoIcon aria-hidden="true" />Photo</Button>
+              <Button disabled={capturing || !rect || rect.width < 2 || rect.height < 2} onClick={() => capture("start_scroll")}><ScanLine aria-hidden="true" />Défilement</Button>
               <Button
-                disabled={state.capabilities?.recording === false}
+                disabled={!rect || rect.width < 2 || rect.height < 2 || state.capabilities?.recording === false}
                 onClick={() => setOptions(!options)}
               >
-                ● Vidéo
+                <Video aria-hidden="true" />Vidéo
               </Button>
-              <Button onClick={() => run("close_overlay")}>×</Button>
+              <Button title="Fermer la sélection" onClick={() => run("close_overlay")}><X aria-hidden="true" /></Button>
             </div>
             {options && (
               <div className="record-options">
@@ -667,7 +703,7 @@ function Selection({
                 )}
                 <Button
                   onClick={() =>
-                    run("start_recording", {
+                    capture("start_recording", {
                       options: {
                         microphone:
                           mic && state.capabilities?.microphone !== false,
@@ -692,8 +728,6 @@ function Selection({
               </div>
             )}
           </div>
-        </div>
-      )}
     </div>
   );
 }

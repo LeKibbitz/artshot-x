@@ -1,6 +1,6 @@
 [package]
 name = "artshot-desktop"
-version = "0.7.0"
+version = "0.7.1"
 description = "Local screen capture, annotation and recording for macOS and Windows 11"
 authors = ["ArtShot X contributors"]
 license = "MIT"

@@ -121,17 +121,22 @@ fn current_display(app: &AppHandle) -> Result<artshot_platform::Display, String>
 }
 #[tauri::command]
 pub async fn begin_selection(app: AppHandle, mode: Option<String>) -> Result<(), String> {
-    if app
-        .state::<Store>()
-        .lock()
-        .map_err(err)?
-        .state
-        .recording
-        .is_some()
-    {
-        windows::show(&app, "recording");
+    let active_surface = {
+        let store = app.state::<Store>();
+        let b = store.lock().map_err(err)?;
+        if b.state.recording.is_some() {
+            Some("recording")
+        } else if b.stitcher.is_some() {
+            Some("scrolling")
+        } else {
+            None
+        }
+    };
+    if let Some(label) = active_surface {
+        windows::show(&app, label);
         return Ok(());
     }
+    crate::diagnostics::record(&app, "selection preparing");
     windows::hide_overlays(&app);
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.hide();
@@ -145,6 +150,7 @@ pub async fn begin_selection(app: AppHandle, mode: Option<String>) -> Result<(),
     windows::selection(&app, &d)?;
     selection_keys(&app, true);
     emit(&app);
+    crate::diagnostics::record(&app, "selection ready");
     Ok(())
 }
 #[tauri::command]
@@ -205,7 +211,7 @@ pub async fn start_scroll(app: AppHandle) -> Result<(), String> {
         Ok((b.target()?.0, b.scroll_epoch))
     })
     .await?;
-    windows::floating(&app, "scrolling", &d, 350., 600.)?;
+    windows::floating(&app, "scrolling", &d, 280., 440.)?;
     emit(&app);
     let a = app.clone();
     tauri::async_runtime::spawn_blocking(move || loop {
@@ -219,22 +225,34 @@ pub async fn start_scroll(app: AppHandle) -> Result<(), String> {
             if b.scroll_epoch != epoch || b.stitcher.is_none() {
                 break;
             }
-            b.poll_scroll()
+            let result = b.poll_scroll();
+            if let Err(e) = &result {
+                if let Some(scroll) = &mut b.state.scrolling {
+                    scroll.active = false;
+                    scroll.status =
+                        "Capture interrompue. Terminez pour conserver les images déjà capturées."
+                            .into();
+                }
+                b.state.error = Some(e.clone());
+            }
+            result
         };
-        if let Err(e) = result {
-            error(&a, e);
+        emit(&a);
+        if result.is_err() {
             break;
         }
-        emit(&a);
     });
     Ok(())
 }
 #[tauri::command]
 pub async fn finish_scroll(app: AppHandle) -> Result<(), String> {
     let d = work(app.clone(), |b| {
-        b.poll_scroll()?;
-        std::thread::sleep(Duration::from_millis(200));
-        b.poll_scroll()?;
+        // A final frame failure must not prevent saving the assembled image.
+        if b.state.scrolling.as_ref().is_some_and(|s| s.active) {
+            let _ = b.poll_scroll();
+            std::thread::sleep(Duration::from_millis(200));
+            let _ = b.poll_scroll();
+        }
         b.finish_scroll()?;
         Ok(b.target()?.0)
     })

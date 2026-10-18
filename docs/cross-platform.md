@@ -1,8 +1,8 @@
-# Migration partagée · 0.7.0 Preview
+# Migration partagée · 0.7.1 Preview
 
 État au 18 octobre 2026. Cibles : macOS 14+ Apple Silicon et Windows 11 x64. Windows 10 et Linux sont hors de ce jalon.
 
-Le code partagé et les adaptateurs sont implémentés. Les installateurs DMG et EXE sont construits et distribués dans [v0.7.0-preview.1](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.0-preview.1). Aucune validation d’exécution sur Windows physique n’a été réalisée dans cette session. Une compilation et des tests de logique ne prouvent pas le fonctionnement d’un bureau Windows interactif.
+Le code partagé et les adaptateurs sont implémentés. Les installateurs DMG et EXE sont construits et distribués dans [v0.7.1-preview.1](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.1-preview.1). Aucune validation d’exécution sur Windows physique n’a été réalisée dans cette session. Une compilation et des tests de logique ne prouvent pas le fonctionnement d’un bureau Windows interactif.
 
 ## Architecture effectivement utilisée
 
@@ -23,7 +23,7 @@ Le code Swift historique dans `Sources/` et ses scripts de test sont conservés.
 
 ## Fonctions présentes
 
-La preview implémente la sélection ajustable, les captures plein écran/zone, les miniatures, la bibliothèque, les annotations PNG avec annulation et le défilement vertical. L’alignement partagé conserve les fixtures Swift : déplacements descendants, en-tête fixe, texte clairsemé et rejet des pieds de page fixes, mouvements inverses ou motifs ambigus.
+La preview implémente la sélection ajustable, les captures plein écran/zone, les miniatures, la bibliothèque, les annotations PNG avec annulation et le défilement vertical. L’alignement partagé conserve les fixtures Swift : déplacements descendants, en-tête fixe, texte clairsemé, en-tête et pied de page fixes ; mouvements inverses ou motifs ambigus refusés.
 
 Les adaptateurs implémentent vidéo d’écran/zone, caméra avec forme/position/zoom, microphone, audio système, pause/reprise et événements de clics/raccourcis. L’éditeur propose retrait de passages, activation des sources/effets disponibles, gains indépendants, aperçu de montage et MP4. Une source absente à la capture ne peut pas être ajoutée ensuite. Les annotations et choix de montage de l’éditeur restent locaux à la session ; les exports contiennent les modifications appliquées.
 
@@ -37,7 +37,7 @@ Des tests CPU couvrent ces transformations, le démarrage retardé, plusieurs re
 
 ## Preuves disponibles et limites
 
-Exécution locale : `cargo test --workspace` — 21 tests réussis (cœur 10, desktop 8, plateforme 3) ; helpers frontend — 4 tests réussis. Ces résultats concernent l’hôte macOS.
+Exécution locale : `cargo test --workspace` — 24 tests réussis (cœur 12, desktop 9, plateforme 3) ; helpers frontend — 4 tests réussis. Ces résultats concernent l’hôte macOS.
 
 | Vérification | État |
 | --- | --- |
@@ -45,7 +45,7 @@ Exécution locale : `cargo test --workspace` — 21 tests réussis (cœur 10, de
 | Backend/export | Tests locaux exécutés : réglages avant démarrage, échec de sauvegarde du défilement, JSON atomique, protection des originaux/alias et conservation d’un export existant en cas d’échec. |
 | Audio Windows | Compilation Windows et Clippy effectués ; algorithmes CPU extraits sans modification et testés sur l’hôte macOS. Les appels WASAPI n’ont pas été exécutés sur Windows. |
 | Adaptateur macOS | Essais de capture PNG et d’enregistrement avec pause/reprise puis export MP4 pendant le développement. Ils ne constituent pas une validation du DMG final. |
-| Paquets | DMG vérifié, monté, installé puis lancé sur Mac Apple Silicon ; capture plein écran PNG 3024 × 1964 et vignette d’actions validées après renouvellement ciblé de l’autorisation. EXE NSIS x64 construit depuis les sources finales ; architecture, dépendances et garde Windows 11 inspectées. Installation Windows, mises à niveau et désinstallation restent à vérifier. |
+| Paquets | DMG vérifié, monté, installé puis lancé sur Mac Apple Silicon ; la 0.7.0 a produit un PNG plein écran de 3024 × 1964 après renouvellement ciblé de l’autorisation. La 0.7.1 ajoute des tests d’interface simulée ; son acceptation clavier et défilement natifs reste en cours. EXE NSIS x64 construit depuis les sources finales ; architecture, dépendances et garde Windows 11 inspectées. Installation Windows, mises à niveau et désinstallation restent à vérifier. |
 | CI GitHub | Workflow préparé dans [docs/ci/desktop-preview.yml](ci/desktop-preview.yml), mais non activé dans `.github/workflows` : les identifiants disponibles n’autorisent pas sa publication. Aucun succès de CI Windows n’est revendiqué. |
 
 ## Acceptation restante

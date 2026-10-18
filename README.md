@@ -1,4 +1,4 @@
-# ArtShot X Preview · 0.7.0
+# ArtShot X Preview · 0.7.1
 
 Capture d’écran, annotation et enregistrement local pour **macOS 14+ Apple Silicon** et **Windows 11 x64**. Interface en français, sans compte.
 
@@ -6,7 +6,7 @@ La migration partage le cœur Rust et l’interface React/Tauri. macOS conserve 
 
 ## Installation
 
-[Télécharger la preview 0.7.0](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.0-preview.1) : les deux installateurs et leurs empreintes SHA-256 sont disponibles. Le DMG a été installé puis lancé sur Mac ; les essais sur Windows physique restent à réaliser.
+[Télécharger la preview 0.7.1](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.1-preview.1) : les deux installateurs et leurs empreintes SHA-256 sont disponibles. Le DMG a été installé puis lancé sur Mac ; les essais sur Windows physique restent à réaliser.
 
 - **macOS** : DMG Apple Silicon, signature ad-hoc, sans notarisation.
 - **Windows** : installateur EXE x64 non signé ; WebView2 installé si nécessaire.
@@ -34,7 +34,7 @@ Les commandes restent accessibles depuis l’icône de barre des menus ou de not
 
 ## État de validation
 
-Les 21 tests Rust du workspace et les 4 tests des helpers frontend passent sur l’hôte de développement. Ils couvrent géométrie, annotations, défilement, coupes, protection des originaux et exports. Les algorithmes audio Windows ont aussi été testés séparément sur CPU. Des captures et exports natifs macOS ont été exercés pendant le développement.
+Les 24 tests Rust du workspace et les 4 tests des helpers frontend passent sur l’hôte de développement. Ils couvrent géométrie, annotations, défilement, coupes, protection des originaux et exports. Les algorithmes audio Windows ont aussi été testés séparément sur CPU. Des captures et exports natifs macOS ont été exercés pendant le développement. Les régressions d’interface de la 0.7.1 sont testées avec un IPC simulé ; les raccourcis physiques et le parcours de défilement natif restent à accepter.
 
 **L’exécution sur Windows physique n’a pas été validée.** Installation, permissions, focus, plein écran, écrans multiples/DPI, caméra et synchronisation audiovisuelle nécessitent encore des essais des paquets distribués. Cette preview ne constitue pas une livraison finale validée sur les deux systèmes.
 

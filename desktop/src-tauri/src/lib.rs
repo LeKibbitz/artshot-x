@@ -1,5 +1,6 @@
 mod backend;
 mod commands;
+mod diagnostics;
 mod model;
 mod windows;
 use commands::*;
@@ -22,6 +23,10 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
+                    diagnostics::record(
+                        app,
+                        &format!("shortcut {:?} {:?}", shortcut.key, event.state),
+                    );
                     if event.state != ShortcutState::Pressed {
                         return;
                     }
@@ -52,7 +57,13 @@ pub fn run() {
                             .await
                         };
                         if let Err(e) = r {
+                            diagnostics::record(&app, &format!("shortcut action {digit} failed"));
                             error(&app, e);
+                        } else {
+                            diagnostics::record(
+                                &app,
+                                &format!("shortcut action {digit} completed"),
+                            );
                         }
                     });
                 })
@@ -77,6 +88,7 @@ pub fn run() {
             app.manage(Mutex::new(
                 backend::Backend::new(root, resources).map_err(std::io::Error::other)?,
             ));
+            diagnostics::record(app.handle(), concat!("started ", env!("CARGO_PKG_VERSION")));
             let capture =
                 MenuItem::with_id(app, "capture", "Sélection et capture", true, None::<&str>)?;
             let full = MenuItem::with_id(app, "full", "Capture plein écran", true, None::<&str>)?;
@@ -134,12 +146,15 @@ pub fn run() {
                     .global_shortcut()
                     .register(Shortcut::new(Some(modifiers), code))
                 {
+                    diagnostics::record(app.handle(), &format!("register {label} failed: {e}"));
                     app.state::<Store>()
                         .lock()
                         .unwrap()
                         .state
                         .shortcut_errors
                         .push(format!("{label} : {e}"));
+                } else {
+                    diagnostics::record(app.handle(), &format!("register {label} ok"));
                 }
             }
             let a = app.handle().clone();

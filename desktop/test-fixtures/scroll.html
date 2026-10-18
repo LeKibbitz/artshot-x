@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><title>ArtShot X — test de défilement</title>
+<style>
+body{margin:0;font:18px system-ui;background:#f5f6fa;color:#182039}
+header,footer{position:fixed;left:0;right:0;background:#182039;color:white;padding:12px 24px;z-index:1}
+header{top:0}footer{bottom:0;font-size:12px}main{max-width:800px;margin:65px auto}
+article{padding:18px 26px;border-bottom:1px solid #bbb;display:flex;gap:30px;align-items:center}
+b{font-size:30px;font-variant-numeric:tabular-nums}p{margin:8px 0}
+</style>
+<header>ArtShot X · page synthétique pour capture défilante</header><main></main>
+<footer>Les étapes doivent rester dans l’ordre, sans doublons. Cette barre fixe doit apparaître une seule fois.</footer>
+<script>
+for(let i=1;i<=60;i++) {
+ const row=document.createElement('article');
+ row.style.background=`hsl(${(i*47)%360} 55% 90%)`;
+ const number=document.createElement('b');number.textContent=String(i).padStart(2,'0');
+ const text=document.createElement('div');
+ const title=document.createElement('strong');title.textContent=`Étape ${i} — repère ${i*7919}`;
+ const detail=document.createElement('p');detail.textContent='Capture locale · faites défiler par petits mouvements, puis marquez une courte pause.';
+ text.append(title,detail);row.append(number,text);document.querySelector('main').append(row);
+}
+</script></html>

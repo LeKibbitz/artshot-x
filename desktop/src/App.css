@@ -15,6 +15,18 @@
   --muted: #9398aa;
   --accent: #b5a0ff;
   --radius: 14px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --floating-gap: 6px;
+  --floating-edge: 5px;
+  --control-y: 7px;
+  --control-x: 9px;
+  --control-icon: 14px;
+  --compact-font: 10px;
+  --compact-radius: 10px;
+  --options-clearance: 100px;
 }
 * {
   box-sizing: border-box;
@@ -413,16 +425,22 @@ article {
   top: calc(100% + 14px);
   background: var(--panel);
   border: 1px solid var(--line);
-  padding: 8px;
-  border-radius: 13px;
+  padding: var(--floating-edge);
+  border-radius: var(--compact-radius);
+  z-index: 5;
+  max-width: calc(100vw - var(--space-4));
   box-shadow: 0 12px 40px #0008;
   cursor: default;
 }
+.selection-toolbar > .toolbar { gap: var(--space-1); }
+.selection-toolbar button { padding: var(--control-y) var(--control-x); font-size: var(--space-3); display: inline-flex; align-items: center; gap: var(--space-1); }
 .record-options {
   padding: 15px 8px 8px;
   display: grid;
   gap: 12px;
-  min-width: 320px;
+  min-width: 0;
+  max-height: calc(100vh - var(--options-clearance));
+  overflow-y: auto;
 }
 .record-options label {
   display: flex;
@@ -432,46 +450,74 @@ article {
 }
 .quick {
   background: var(--panel);
-  padding: 8px;
-  border-radius: 14px;
+  padding: var(--space-2);
+  border-radius: var(--radius);
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: var(--floating-gap);
 }
-.quick img {
+.quick img, .quick video {
   display: block;
-  max-width: 100%;
-  max-height: 260px;
+  width: 100%;
+  flex: 1 1 0;
+  min-height: 0;
   object-fit: contain;
-  margin: auto;
 }
 .quick .toolbar {
-  justify-content: center;
-  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-1);
+  flex-shrink: 0;
 }
 .quick button {
-  padding: 8px;
-  font-size: 11px;
+  min-width: 0;
+  padding: var(--control-x) 0;
+  font-size: var(--compact-font);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+.quick svg, .selection-toolbar svg {
+  width: var(--control-icon);
+  height: var(--control-icon);
+  flex-shrink: 0;
 }
 .scroll-window {
   background: var(--bg);
-  height: 100vh;
-  padding: 18px;
-  overflow: auto;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: var(--space-3);
 }
 .scroll-window header {
-  position: sticky;
-  top: 0;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  font-size: var(--space-3);
   background: var(--bg);
   margin: 0;
-  padding: 10px 0;
-  gap: 10px;
+  padding: var(--space-2) 0;
+  gap: var(--space-2);
 }
+.scroll-window header button { padding: var(--space-2); }
 .scroll-window img {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 0;
   width: 100%;
-  display: block;
+  object-fit: contain;
 }
 .scroll-window p {
-  font-size: 12px;
-  margin-top: 10px;
+  flex-shrink: 0;
+  font-size: var(--space-3);
+  margin: var(--space-2) 0;
+  line-height: 1.4;
 }
+.scroll-window .empty { min-height: 0; flex: 1; padding: var(--space-4); }
 .editor-tools {
   flex-wrap: wrap;
   padding: 12px;
@@ -614,7 +660,4 @@ article {
   }
 }
 
-.quick {height:100vh; display:flex; flex-direction:column;}
-.quick img,.quick video {width:100%;flex:1;min-height:0;object-fit:contain;}
-.quick .toolbar {flex-shrink:0;}
-.scroll-window img {height:calc(100vh - 125px); width:100%; object-fit:contain;}
+.quick-error .error { position: static; transform: none; max-width: 100%; flex-wrap: wrap; overflow: auto; }

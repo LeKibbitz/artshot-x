@@ -32,6 +32,7 @@ impl Backend {
         fs::create_dir_all(&root).map_err(err)?;
         fs::create_dir_all(root.join("captures")).map_err(err)?;
         fs::create_dir_all(root.join("cache")).map_err(err)?;
+        clear_selection_backgrounds(&root.join("cache"), None);
         let mut state = AppState::default();
         if root.join("library.json").exists() {
             state.library =
@@ -139,8 +140,10 @@ impl Backend {
     pub fn prepare(&mut self, d: Display, mode: String) -> Result<(), String> {
         self.ensure_idle()?;
         let frame = self.frame(&d, None)?;
-        let path = self.root.join("cache/selection.png");
-        frame.save(&path).map_err(err)?;
+        let path = self.write_selection_background(&frame)?;
+        // The old overlay is hidden before prepare. Retain only the new asset;
+        // selection backgrounds are temporary screenshots, not library items.
+        clear_selection_backgrounds(&self.root.join("cache"), Some(&path));
         self.state.selection = None;
         self.state.selection_mode = mode;
         self.state.selection_display = Some(SelectionDisplay {
@@ -153,6 +156,15 @@ impl Backend {
         self.display = Some(d);
         self.state.error = None;
         Ok(())
+    }
+    fn write_selection_background(&self, frame: &RgbaImage) -> Result<PathBuf, String> {
+        // Asset URLs are cached by the webview: each selection needs its own URL.
+        let path = self
+            .root
+            .join("cache")
+            .join(format!("selection-{}.png", Uuid::new_v4()));
+        frame.save(&path).map_err(err)?;
+        Ok(path)
     }
     pub fn ensure_idle(&self) -> Result<(), String> {
         if self.state.recording.is_some() || self.stitcher.is_some() {
@@ -641,6 +653,28 @@ impl Backend {
         Ok(())
     }
 }
+
+fn clear_selection_backgrounds(cache: &Path, keep: Option<&Path>) {
+    let Ok(entries) = fs::read_dir(cache) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if keep == Some(path.as_path()) {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let owned = name
+            .strip_prefix("selection-")
+            .and_then(|n| n.strip_suffix(".png"))
+            .is_some_and(|id| Uuid::parse_str(id).is_ok());
+        if owned {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
 pub fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -697,6 +731,35 @@ mod tests {
         let path = std::env::temp_dir().join(format!("artshot-backend-{}", Uuid::new_v4()));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+    #[test]
+    fn selection_backgrounds_have_fresh_urls_and_pixels() {
+        let root = test_directory();
+        let backend = Backend::new(root.clone(), root.clone()).unwrap();
+        let first = backend
+            .write_selection_background(&RgbaImage::from_pixel(
+                4,
+                4,
+                image::Rgba([10, 20, 30, 255]),
+            ))
+            .unwrap();
+        let second = backend
+            .write_selection_background(&RgbaImage::from_pixel(
+                4,
+                4,
+                image::Rgba([90, 80, 70, 255]),
+            ))
+            .unwrap();
+        assert_ne!(first, second);
+        assert_eq!(
+            image::open(first).unwrap().into_rgba8().get_pixel(0, 0).0,
+            [10, 20, 30, 255]
+        );
+        assert_eq!(
+            image::open(second).unwrap().into_rgba8().get_pixel(0, 0).0,
+            [90, 80, 70, 255]
+        );
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn settings_failure_prevents_native_recording_start() {

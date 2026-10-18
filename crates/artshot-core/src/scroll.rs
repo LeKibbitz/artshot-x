@@ -15,15 +15,17 @@ pub enum AppendResult {
     Rejected,
 }
 fn unchanged(a: &GrayImage, b: &GrayImage, tolerance: f64) -> bool {
+    // Carets, clocks and cursor highlights may change while the page is at rest.
+    // Ignore isolated changes, but never a moving band of page content.
     let mut total = 0.;
+    let mut changed = 0usize;
     for (x, y) in a.as_raw().iter().zip(b.as_raw()) {
         let d = (*x as f64 - *y as f64).abs();
-        if d > 6. {
-            return false;
-        }
+        changed += usize::from(d > 6.);
         total += d;
     }
-    total / a.as_raw().len() as f64 <= tolerance
+    let count = a.as_raw().len();
+    count > 0 && changed as f64 / count as f64 <= 0.002 && total / count as f64 <= tolerance
 }
 pub fn is_stable(a: &GrayImage, b: &GrayImage) -> bool {
     a.dimensions() == b.dimensions() && a.width() > 0 && a.height() > 0 && unchanged(a, b, 0.65)
@@ -64,12 +66,12 @@ fn score(
         error / weight
     }
 }
-fn fixed_footer(a: &GrayImage, b: &GrayImage) -> bool {
+fn fixed_footer(a: &GrayImage, b: &GrayImage) -> u32 {
     let w = a.width();
     let mut rows = 0;
     let mut lo = 255;
     let mut hi = 0;
-    for y in (a.height() * 9 / 10..a.height()).rev() {
+    for y in (a.height() * 3 / 4..a.height()).rev() {
         let mut error = 0.;
         for x in w / 20..w - w / 20 {
             error += (a.get_pixel(x, y).0[0] as f64 - b.get_pixel(x, y).0[0] as f64).abs();
@@ -84,7 +86,11 @@ fn fixed_footer(a: &GrayImage, b: &GrayImage) -> bool {
             hi = hi.max(v);
         }
     }
-    rows >= 6.max(a.height() / 100) && hi - lo > 24
+    if rows >= 6.max(a.height() / 100) && hi - lo > 24 {
+        rows
+    } else {
+        0
+    }
 }
 pub fn align(a: &GrayImage, b: &GrayImage) -> ScrollAlignment {
     if a.dimensions() != b.dimensions() || a.width() < 8 || a.height() < 48 {
@@ -95,7 +101,7 @@ pub fn align(a: &GrayImage, b: &GrayImage) -> ScrollAlignment {
     }
     let h = a.height();
     let top = h / 4;
-    let bottom = 2.max(h / 20);
+    let bottom = 2.max(h / 20).max(fixed_footer(a, b));
     let maxshift = h - top - bottom - 20.max(h / 5);
     if maxshift == 0 {
         return ScrollAlignment::Unalignable;
@@ -137,7 +143,6 @@ pub fn align(a: &GrayImage, b: &GrayImage) -> ScrollAlignment {
         || refined
             .get(1)
             .is_some_and(|p| p.1 <= (best.1 * 1.4).max(best.1 + 0.45))
-        || fixed_footer(a, b)
     {
         ScrollAlignment::Unalignable
     } else {
@@ -171,10 +176,22 @@ impl ScrollStitcher {
                 };
                 let mut composite = RgbaImage::new(next.width(), height);
                 imageops::replace(&mut composite, &self.composite, 0, 0);
-                let strip =
-                    imageops::crop_imm(&next, 0, next.height() - pixels, next.width(), pixels)
-                        .to_image();
-                imageops::replace(&mut composite, &strip, 0, self.composite.height() as i64);
+                // Replace the previous fixed footer, retaining it only at the end.
+                let footer = fixed_footer(&a, &b);
+                let strip = imageops::crop_imm(
+                    &next,
+                    0,
+                    next.height() - footer - pixels,
+                    next.width(),
+                    pixels + footer,
+                )
+                .to_image();
+                imageops::replace(
+                    &mut composite,
+                    &strip,
+                    0,
+                    (self.composite.height() - footer) as i64,
+                );
                 self.composite = composite;
                 self.last = next;
                 AppendResult::Accepted { rows: pixels }
@@ -226,10 +243,47 @@ mod tests {
         for (a, b) in [
             (frame(40, 0, 0), frame(0, 0, 0)),
             (frame(0, 0, 0), frame(240, 0, 0)),
-            (frame(0, 0, 15), frame(30, 0, 15)),
         ] {
             assert_eq!(align(&a, &b), ScrollAlignment::Unalignable);
         }
+    }
+    #[test]
+    fn fixed_browser_footer_is_retained_once() {
+        let rgb = |f| image::DynamicImage::ImageLuma8(f).into_rgba8();
+        let mut stitcher = ScrollStitcher::new(rgb(frame(0, 35, 15))).unwrap();
+        for offset in [30, 60, 90] {
+            assert_eq!(
+                stitcher.append(rgb(frame(offset, 35, 15))),
+                AppendResult::Accepted { rows: 30 }
+            );
+            assert_eq!(
+                stitcher.append(rgb(frame(offset, 35, 15))),
+                AppendResult::Unchanged
+            );
+        }
+        let output = stitcher.finish();
+        assert_eq!(output.height(), 270);
+        // Every body row follows the document; neither browser bar repeats.
+        let expected = rgb(frame(90, 35, 15));
+        for y in 35..255 {
+            let document_row = y;
+            let sample = rgb(frame(document_row - 35, 35, 15));
+            assert_eq!(output.get_pixel(20, y), sample.get_pixel(20, 35));
+        }
+        for y in 0..15 {
+            assert_eq!(
+                output.get_pixel(20, 255 + y),
+                expected.get_pixel(20, 165 + y)
+            );
+        }
+    }
+    #[test]
+    fn stable_page_allows_a_blinking_caret_but_not_motion() {
+        let a = frame(0, 0, 0);
+        let mut b = a.clone();
+        b.put_pixel(20, 20, image::Luma([255]));
+        assert!(is_stable(&a, &b));
+        assert!(!is_stable(&a, &frame(1, 0, 0)));
     }
     #[test]
     fn whole_preview_and_seam() {

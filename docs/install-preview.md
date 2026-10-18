@@ -1,8 +1,8 @@
-# Installer ArtShot X Preview · 0.7.0
+# Installer ArtShot X Preview · 0.7.1
 
 Cibles : **macOS 14+ Apple Silicon** et **Windows 11 x64**.
 
-[Télécharger v0.7.0-preview.1](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.0-preview.1). Les deux installateurs ont été construits localement et sont joints à la release avec leurs empreintes. Le DMG a été monté, vérifié, installé puis lancé sur Mac Apple Silicon. La compilation Windows ne constitue pas un essai d’installation ou d’exécution sur Windows réel.
+[Télécharger v0.7.1-preview.1](https://github.com/LeKibbitz/artshot-x/releases/tag/v0.7.1-preview.1). Les deux installateurs ont été construits localement et sont joints à la release avec leurs empreintes. Le DMG a été monté, vérifié, installé puis lancé sur Mac Apple Silicon. La compilation Windows ne constitue pas un essai d’installation ou d’exécution sur Windows réel.
 
 ## Avant de commencer
 
@@ -64,7 +64,7 @@ cargo test --workspace
 node desktop/scripts/package-macos.mjs
 ```
 
-`package-macos.mjs` construit le bundle `.app`, signe l’adaptateur et l’application en ad-hoc, vérifie les signatures, puis crée et vérifie le DMG directement avec `hdiutil`. Il évite l’étape de présentation Finder/AppleScript et affiche l’empreinte SHA-256. Le résultat est écrit dans `dist/ArtShot-X-0.7.0-macOS-arm64.dmg` sur Apple Silicon.
+`package-macos.mjs` construit le bundle `.app`, signe l’adaptateur et l’application en ad-hoc, vérifie les signatures, puis crée et vérifie le DMG directement avec `hdiutil`. Il évite l’étape de présentation Finder/AppleScript et affiche l’empreinte SHA-256. Le résultat est écrit dans `dist/ArtShot-X-0.7.1-macOS-arm64.dmg` sur Apple Silicon.
 
 Après un build final déjà terminé, réutiliser son bundle sans recompiler :
 

@@ -40,6 +40,14 @@ Capturer une petite zone, l’ouvrir dans l’éditeur, ajouter une flèche puis
 
 En cas de raccourci occupé, fermer les autres versions d’ArtShot X ; les commandes de l’icône restent disponibles. Conserver le texte exact de toute erreur avec la version du système, le nombre d’écrans et les sources sélectionnées.
 
+### Raccourcis et autorisation macOS
+
+Les raccourcis ne sont actifs que lorsque **ArtShot X Preview** tourne : son icône doit être présente dans la barre des menus. Fermer la bibliothèque laisse l’application en arrière-plan ; la commande Quitter désactive les raccourcis. Cette preview ne démarre pas automatiquement à l’ouverture de session.
+
+Si l’interrupteur d’autorisation est activé mais que la capture est refusée après un remplacement de build, macOS peut conserver la signature d’une ancienne preview. Quitter Preview, retirer uniquement son entrée dans **Enregistrement de l’écran et des sons du système**, puis la réajouter avec le bouton `+` en sélectionnant l’application réellement installée dans Applications. Autoriser et relancer Preview. La rubrique **Enregistrement des sons du système uniquement** ne donne pas accès à l’image de l’écran.
+
+Conserver une seule copie installée de Preview. La version Swift historique porte un autre nom et une autre autorisation ; ses réglages ne réparent pas ceux de Preview.
+
 ## Construction locale
 
 Prérequis développeur : Node.js 22, Rust stable et outils de compilation natifs. macOS demande Xcode Command Line Tools et le SDK macOS approprié. Windows demande Visual Studio Build Tools, les outils C++ et le SDK Windows.

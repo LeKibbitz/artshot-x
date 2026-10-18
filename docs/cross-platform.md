@@ -45,7 +45,7 @@ Exécution locale : `cargo test --workspace` — 21 tests réussis (cœur 10, de
 | Backend/export | Tests locaux exécutés : réglages avant démarrage, échec de sauvegarde du défilement, JSON atomique, protection des originaux/alias et conservation d’un export existant en cas d’échec. |
 | Audio Windows | Compilation Windows et Clippy effectués ; algorithmes CPU extraits sans modification et testés sur l’hôte macOS. Les appels WASAPI n’ont pas été exécutés sur Windows. |
 | Adaptateur macOS | Essais de capture PNG et d’enregistrement avec pause/reprise puis export MP4 pendant le développement. Ils ne constituent pas une validation du DMG final. |
-| Paquets | DMG vérifié, monté, installé puis lancé sur Mac Apple Silicon. EXE NSIS x64 construit depuis les sources finales ; architecture, dépendances et garde Windows 11 inspectées. Installation Windows, mises à niveau et désinstallation restent à vérifier. |
+| Paquets | DMG vérifié, monté, installé puis lancé sur Mac Apple Silicon ; capture plein écran PNG 3024 × 1964 et vignette d’actions validées après renouvellement ciblé de l’autorisation. EXE NSIS x64 construit depuis les sources finales ; architecture, dépendances et garde Windows 11 inspectées. Installation Windows, mises à niveau et désinstallation restent à vérifier. |
 | CI GitHub | Workflow préparé dans [docs/ci/desktop-preview.yml](ci/desktop-preview.yml), mais non activé dans `.github/workflows` : les identifiants disponibles n’autorisent pas sa publication. Aucun succès de CI Windows n’est revendiqué. |
 
 ## Acceptation restante

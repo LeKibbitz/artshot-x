@@ -8,6 +8,19 @@ ArtShot X targets macOS and Windows 11. Windows 10 is outside the requested scop
 
 Version 0.6.2 is still a macOS-only Swift/AppKit application. No Windows executable or installer exists yet. This document records the target architecture and migration sequence, not implemented Windows support.
 
+## Required final deliverables
+
+The finished product must be downloadable and installable by ordinary users. Source code, build scripts or a successful CI build alone do not satisfy delivery.
+
+- **macOS:** a versioned `.dmg` containing ArtShot X, installable into Applications.
+- **Windows 11:** a versioned `.exe` setup installer with an application entry, shortcuts and an uninstall entry.
+- Publish both artifacts on GitHub Releases with the supported OS/CPU architectures, version, checksums and short installation instructions.
+- Installation and normal use must require no terminal, compiler, Rust, Node.js, Xcode or other development tools. The installer must handle required runtime dependencies.
+- Verify download, installation, first launch, permission onboarding, the supported capture/edit/export flows, upgrade from the previous preview and removal of the application on each target OS. Upgrades must preserve local captures and settings.
+- Validate the distributed packages, not only development builds. Record signing/notarization status accurately; establish release signing identities before claiming a signed public distribution.
+
+Early previews may contain a clearly stated subset of features. They do not count as the finished product until the agreed capture, scrolling, recording and editing scope has passed acceptance on both systems. Windows hardware acceptance will use external testers as agreed.
+
 ## Target architecture
 
 | Area | Choice | Reason |
